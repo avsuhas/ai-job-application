@@ -33,6 +33,9 @@ class StubProvider(ReasoningProvider):
     async def generate_application_answer(self, request):
         raise NotImplementedError
 
+    async def resolve_form_field(self, request):
+        raise NotImplementedError
+
 
 @pytest.fixture
 def fixtures_dir() -> Path:

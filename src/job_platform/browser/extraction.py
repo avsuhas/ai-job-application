@@ -57,6 +57,13 @@ EXTRACTION_SCRIPT = r"""
     return '';
   };
 
+  const formIdFor = (el) => {
+    const form = el.closest('form');
+    if (!form) return '';
+    const index = Array.prototype.indexOf.call(document.forms, form);
+    return form.id || form.getAttribute('name') || `form_${index}`;
+  };
+
   const fields = [];
   const radioGroups = {};
 
@@ -84,6 +91,8 @@ EXTRACTION_SCRIPT = r"""
           read_only: false,
           placeholder: '',
           help_text: '',
+          autocomplete: '',
+          form_id: formIdFor(el),
         };
         fields.push(radioGroups[name]);
       }
@@ -133,6 +142,8 @@ EXTRACTION_SCRIPT = r"""
       visible: visible,
       enabled: !el.disabled,
       read_only: el.readOnly === true,
+      autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
+      form_id: formIdFor(el),
     });
   });
 
@@ -152,6 +163,7 @@ EXTRACTION_SCRIPT = r"""
       type: type,
       label: text,
       selector: el.id ? `#${cssEscape(el.id)}` : '',
+      form_id: formIdFor(el),
     });
   });
 

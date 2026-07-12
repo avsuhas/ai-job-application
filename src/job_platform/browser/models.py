@@ -56,6 +56,8 @@ class FormField(BaseModel):
     visible: bool = True
     enabled: bool = True
     read_only: bool = False
+    autocomplete: str = ""
+    form_id: str = ""
 
 
 class FormAction(BaseModel):
@@ -63,6 +65,7 @@ class FormAction(BaseModel):
     type: str = "unknown"  # next | submit | back | unknown
     label: str = ""
     selector: str
+    form_id: str = ""
 
 
 class SafetySignals(BaseModel):

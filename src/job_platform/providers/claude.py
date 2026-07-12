@@ -20,6 +20,8 @@ from job_platform.providers.prompts import PromptService
 from job_platform.providers.tasks import (
     CoverLetterDraft,
     CoverLetterRequest,
+    FormFieldResolution,
+    FormFieldResolutionRequest,
     NarrativeAnswerRequest,
     NarrativeAnswerResult,
     ResumeSelectionRequest,
@@ -261,4 +263,22 @@ class ClaudeProvider(ReasoningProvider):
                 "title": request.job.title,
             },
             NarrativeAnswerResult,
+        )
+
+    async def resolve_form_field(
+        self, request: FormFieldResolutionRequest
+    ) -> FormFieldResolution:
+        return await self._structured_task(
+            "form_resolution",
+            {
+                "candidate_context": request.candidate_context,
+                "page_heading": request.page_heading or "Unknown",
+                "section": request.section or "None",
+                "label": request.label,
+                "placeholder": request.placeholder or "None",
+                "help_text": request.help_text or "None",
+                "field_type": request.field_type or "unknown",
+                "options": ", ".join(request.options) or "None",
+            },
+            FormFieldResolution,
         )

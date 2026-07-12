@@ -15,6 +15,8 @@ from job_platform.jobs.models import Job, JobAnalysis
 from job_platform.providers.tasks import (
     CoverLetterDraft,
     CoverLetterRequest,
+    FormFieldResolution,
+    FormFieldResolutionRequest,
     NarrativeAnswerRequest,
     NarrativeAnswerResult,
     ResumeSelectionRequest,
@@ -62,3 +64,9 @@ class ReasoningProvider(ABC):
         self, request: NarrativeAnswerRequest
     ) -> NarrativeAnswerResult:
         """Generate one narrative application answer from approved facts."""
+
+    @abstractmethod
+    async def resolve_form_field(
+        self, request: FormFieldResolutionRequest
+    ) -> FormFieldResolution:
+        """Determine what an unknown form field means and how to answer it."""

@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–5 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–6 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -38,11 +38,17 @@ Implemented so far (Phases 0–5 of the [roadmap](docs/17%20-%20Implementation%2
   progression verification, CAPTCHA/login/MFA pause detection, crash
   recovery via execution state, screenshot evidence — no submit capability
   yet, tested against local synthetic forms in local_test_sites/
+- Generic Form Engine (docs/09): form boundary detection (application vs
+  search/newsletter/login forms), deterministic semantic field classification
+  with provider fallback for unknowns, prepared-answer mapping with
+  confidence gating (high=auto, medium=review, low=user), dynamic
+  conditional-field rounds, review-page detection, and ambiguous-final-action
+  protection — the engine never clicks submit
 - Local FastAPI service exposing the full discover → rank → prepare →
   review → readiness → manual completion workflow
 
-Not yet implemented: generic form engine (Phase 6), dedicated ATS adapters,
-queue orchestration, automated submission and verification, frontend.
+Not yet implemented: dedicated ATS adapters (Phase 7), queue orchestration
+(Phase 8), automated submission and verification (Phase 9+), frontend.
 
 ## Quick start
 

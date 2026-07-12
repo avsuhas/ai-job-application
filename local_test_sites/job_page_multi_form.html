@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Backend Engineer — ExampleCo Careers</title></head>
+<body>
+<header>
+  <form id="job_search" action="#">
+    <label for="q">Search jobs</label>
+    <input type="text" id="q" name="q" placeholder="Search jobs by keyword">
+    <button type="submit">Search</button>
+  </form>
+</header>
+
+<main>
+  <h1>Apply: Backend Engineer</h1>
+  <form id="application">
+    <label for="first_name">First Name</label>
+    <input type="text" id="first_name" name="first_name" required>
+
+    <label for="last_name">Last Name</label>
+    <input type="text" id="last_name" name="last_name" required>
+
+    <label for="email">Email Address</label>
+    <input type="email" id="email" name="email" required>
+
+    <label for="resume">Resume/CV</label>
+    <input type="file" id="resume" name="resume" required>
+
+    <fieldset>
+      <legend>Are you legally authorized to work in the United States?</legend>
+      <label><input type="radio" name="authorized" value="Yes"> Yes</label>
+      <label><input type="radio" name="authorized" value="No"> No</label>
+    </fieldset>
+
+    <label for="favorite_color">What is your favorite color?</label>
+    <input type="text" id="favorite_color" name="favorite_color">
+
+    <a href="multi_page_review.html" id="continue" role="button">Continue</a>
+  </form>
+</main>
+
+<aside>
+  <form id="newsletter" action="#">
+    <label for="nl_email">Email</label>
+    <input type="email" id="nl_email" name="nl_email" placeholder="Subscribe to our newsletter">
+    <button type="submit">Subscribe</button>
+  </form>
+</aside>
+</body>
+</html>

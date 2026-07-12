@@ -96,3 +96,26 @@ class NarrativeAnswerResult(BaseModel):
     candidate_sources: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
+
+
+class FormFieldResolutionRequest(BaseModel):
+    label: str
+    placeholder: str = ""
+    help_text: str = ""
+    field_type: str = ""
+    options: list[str] = Field(default_factory=list)
+    section: str = ""
+    page_heading: str = ""
+    candidate_context: str = ""
+
+
+class FormFieldResolution(BaseModel):
+    """docs/05 Task Contract: Form Field Resolution."""
+
+    field_semantic_type: str = "unknown"
+    resolved_value: str = ""
+    selected_option: str | None = None
+    source: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    requires_user_input: bool = False
+    notes: str = ""
