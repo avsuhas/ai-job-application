@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from job_platform.api.deps import AppState
 from job_platform.api.routes import (
     applications,
+    browser,
     candidate,
     companies,
     history,
@@ -85,4 +86,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(searches.router)
     app.include_router(applications.router)
     app.include_router(history.router)
+    app.include_router(browser.router)
     return app

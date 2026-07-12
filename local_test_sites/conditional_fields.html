@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply — Eligibility</title></head>
+<body>
+<h1>Eligibility Questions</h1>
+<form>
+  <fieldset>
+    <legend>Will you now or in the future require visa sponsorship?</legend>
+    <label><input type="radio" name="sponsorship" value="Yes"> Yes</label>
+    <label><input type="radio" name="sponsorship" value="No"> No</label>
+  </fieldset>
+
+  <div id="visa-details" style="display:none">
+    <label for="visa_type">Current visa type</label>
+    <input type="text" id="visa_type" name="visa_type">
+  </div>
+
+  <button type="button" id="next-button">Continue</button>
+</form>
+<script>
+  document.querySelectorAll('input[name="sponsorship"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      document.getElementById('visa-details').style.display =
+        this.value === 'Yes' ? 'block' : 'none';
+    });
+  });
+</script>
+</body>
+</html>

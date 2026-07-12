@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–4 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–5 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -32,17 +32,24 @@ Implemented so far (Phases 0–4 of the [roadmap](docs/17%20-%20Implementation%2
 - Manual handoff (Local Alpha): manual-completion checklist with sensitive-
   answer flags, per-answer editing with optional save-for-reuse, manual
   submission recording with accurate source attribution
+- Browser automation foundation (docs/06): Playwright/Chromium with
+  persistent profiles, URL trust policy, structured form extraction,
+  verified action primitives (fill/select/radio/checkbox/upload), page
+  progression verification, CAPTCHA/login/MFA pause detection, crash
+  recovery via execution state, screenshot evidence — no submit capability
+  yet, tested against local synthetic forms in local_test_sites/
 - Local FastAPI service exposing the full discover → rank → prepare →
   review → readiness → manual completion workflow
 
-Not yet implemented: browser automation (Playwright, Phase 5+), generic form
-engine, ATS submission adapters, queue orchestration, frontend.
+Not yet implemented: generic form engine (Phase 6), dedicated ATS adapters,
+queue orchestration, automated submission and verification, frontend.
 
 ## Quick start
 
 ```bash
-# 1. Install dependencies (Python 3.11+)
+# 1. Install dependencies (Python 3.11+) and the browser runtime
 uv sync --group dev
+uv run playwright install chromium
 
 # 2. Configure secrets
 cp .env.example .env   # add ANTHROPIC_API_KEY and REASONING__MODEL

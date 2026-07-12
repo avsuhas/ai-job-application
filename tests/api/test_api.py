@@ -125,3 +125,11 @@ class TestHistory:
         response = client.post("/api/history", json=record)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "duplicate_application"
+
+
+class TestBrowserHealth:
+    def test_browser_health_endpoint(self, client):
+        body = client.get("/api/browser/health").json()
+        assert "healthy" in body
+        assert "chromium_installed" in body
+        assert isinstance(body["problems"], list)

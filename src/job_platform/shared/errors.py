@@ -51,5 +51,15 @@ class StorageError(JobPlatformError):
     code = "storage_error"
 
 
+class BrowserError(JobPlatformError):
+    code = "browser_error"
+
+
+class NavigationBlockedError(BrowserError):
+    """Navigation target violates the URL trust policy (docs/06)."""
+
+    code = "navigation_blocked"
+
+
 class DuplicateApplicationError(StorageError):
     code = "duplicate_application"
