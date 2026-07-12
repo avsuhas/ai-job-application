@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+<title>Job Application for Backend Engineer at ExampleCo</title>
+</head>
+<body>
+<h1>Backend Engineer</h1>
+<h2>Apply for this Job</h2>
+<form id="application_form">
+  <section>
+    <label for="first_name">First Name *</label>
+    <input type="text" id="first_name" name="job_application[first_name]" required>
+
+    <label for="last_name">Last Name *</label>
+    <input type="text" id="last_name" name="job_application[last_name]" required>
+
+    <label for="email">Email *</label>
+    <input type="email" id="email" name="job_application[email]" required>
+
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="job_application[phone]">
+  </section>
+
+  <section>
+    <h3>Resume/CV</h3>
+    <label for="resume">Attach your Resume/CV *</label>
+    <input type="file" id="resume" name="job_application[resume]" required>
+
+    <label for="cover_letter">Attach a Cover Letter</label>
+    <input type="file" id="cover_letter" name="job_application[cover_letter]">
+  </section>
+
+  <section>
+    <h3>Custom Questions</h3>
+    <label for="job_application_answers_attributes_0_text_value">
+      Describe the most interesting distributed system you have built.
+    </label>
+    <textarea id="job_application_answers_attributes_0_text_value"
+              name="job_application[answers_attributes][0][text_value]" rows="4"></textarea>
+
+    <fieldset>
+      <legend>Are you legally authorized to work in the United States? *</legend>
+      <label><input type="radio" name="authorized" value="Yes"> Yes</label>
+      <label><input type="radio" name="authorized" value="No"> No</label>
+    </fieldset>
+  </section>
+
+  <section>
+    <h3>Voluntary Self-Identification</h3>
+    <label for="gender">Gender</label>
+    <select id="gender" name="job_application[gender]">
+      <option value="">Please select</option>
+      <option>Male</option>
+      <option>Female</option>
+      <option>Decline To Self Identify</option>
+    </select>
+  </section>
+
+  <input type="submit" id="submit_app" value="Submit Application">
+</form>
+</body>
+</html>

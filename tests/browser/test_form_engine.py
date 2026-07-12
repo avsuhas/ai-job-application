@@ -21,6 +21,7 @@ ANSWERS = PreparedAnswerSet(
         answer("personal.first_name", "Alex"),
         answer("personal.last_name", "Sample"),
         answer("personal.email", "alex@example.com"),
+        answer("personal.phone", "+1-555-0100"),
         answer("work_authorization.authorized_now", "Yes"),
         answer("work_authorization.sponsorship_now", "Yes"),
         answer("work_authorization.visa_status", "H1B"),

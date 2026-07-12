@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from fastapi import Request
 
+from job_platform.ats.greenhouse import default_registry
+from job_platform.ats.registry import ATSAdapterRegistry
 from job_platform.candidate.loader import load_candidate_bundle
 from job_platform.candidate.models import CandidateBundle
 from job_platform.jobs.service import DiscoveryService
@@ -30,6 +32,7 @@ class AppState:
     tracker: ApplicationTracker
     search_store: SearchStore
     package_store: PackageStore
+    ats_registry: ATSAdapterRegistry
     companies: list[CompanySource] = field(default_factory=list)
     _bundle: CandidateBundle | None = None
 
@@ -42,6 +45,7 @@ class AppState:
             tracker=ApplicationTracker(settings.paths.tracker_path),
             search_store=SearchStore(settings.paths.searches_dir),
             package_store=PackageStore(settings.paths.packages_dir),
+            ats_registry=default_registry(),
             companies=load_company_sources(settings.companies_path),
         )
 

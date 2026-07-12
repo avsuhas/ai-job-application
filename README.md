@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–6 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–7 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -44,11 +44,16 @@ Implemented so far (Phases 0–6 of the [roadmap](docs/17%20-%20Implementation%2
   confidence gating (high=auto, medium=review, low=user), dynamic
   conditional-field rounds, review-page detection, and ambiguous-final-action
   protection — the engine never clicks submit
+- Greenhouse ATS adapter (docs/09, beta): multi-signal detection (domain,
+  embedded iframe, page signature), page classification, job-identity
+  extraction, exact field-id semantics, submission-control identification
+  (never clicked), simulated confirmation verification, registry with
+  priority resolution and safe generic fallback
 - Local FastAPI service exposing the full discover → rank → prepare →
   review → readiness → manual completion workflow
 
-Not yet implemented: dedicated ATS adapters (Phase 7), queue orchestration
-(Phase 8), automated submission and verification (Phase 9+), frontend.
+Not yet implemented: queue orchestration (Phase 8), automated submission and
+verification (Phase 9+), additional ATS adapters, frontend.
 
 ## Quick start
 

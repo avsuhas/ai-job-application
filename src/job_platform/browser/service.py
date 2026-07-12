@@ -178,6 +178,7 @@ class BrowserSession:
             actions=[FormAction.model_validate(a) for a in raw.get("actions", [])],
             signals=signals,
             validation_errors=raw.get("validation_errors", []),
+            frames=content.iframe_titles,
         )
         logger.info(
             "Inspected page (state=%s, fields=%d, actions=%d)",

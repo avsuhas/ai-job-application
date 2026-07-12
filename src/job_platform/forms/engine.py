@@ -14,10 +14,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from job_platform.browser.models import ActionResult, ActionStatus, PageSnapshot
+
+if TYPE_CHECKING:  # avoid a runtime import cycle with the ats package
+    from job_platform.ats.base import ATSAdapter, ConfirmationResult
 from job_platform.browser.service import BrowserSession, snapshot_requires_pause
 from job_platform.candidate.models import CandidateBundle
 from job_platform.forms.boundary import detect_form_boundary
@@ -48,25 +52,31 @@ class EngineStatus(StrEnum):
     STOPPED_NO_PROGRESSION = "stopped_no_progression"
     NO_APPLICATION_FORM = "no_application_form"
     MAX_PAGES_REACHED = "max_pages_reached"
+    CONFIRMATION_DETECTED = "confirmation_detected"
+    APPLICATION_CLOSED = "application_closed"
 
 
 class PageResult(BaseModel):
     page_number: int
     url: str
     heading: str = ""
+    page_type: str = ""
     entries: list[PlanEntry] = Field(default_factory=list)
     action_results: list[ActionResult] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
     dynamic_rounds: int = 0
+    submission_control: str | None = None
 
 
 class FormExecutionReport(BaseModel):
     """Generic-form diagnostics (docs/09) persisted inside the package."""
 
     package_id: str = ""
+    adapter_id: str | None = None
     status: EngineStatus
     pages: list[PageResult] = Field(default_factory=list)
     screenshot: str | None = None
+    confirmation: dict | None = None
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
 
@@ -130,6 +140,7 @@ class GenericFormEngine:
         candidate_context: str = "",
         max_pages: int = 8,
         max_dynamic_rounds: int = 3,
+        adapter: ATSAdapter | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -138,10 +149,19 @@ class GenericFormEngine:
         self._candidate_context = candidate_context
         self._max_pages = max_pages
         self._max_dynamic_rounds = max_dynamic_rounds
+        self._adapter = adapter
 
     async def _plan_for_fields(self, fields, heading: str) -> FormPlan:
         classifications = {}
         for field in fields:
+            # ATS-specific field knowledge wins over generic rules (docs/09
+            # Semantic Classification Priority: ATS mapping before synonyms).
+            ats_classification = (
+                self._adapter.classify_field(field) if self._adapter else None
+            )
+            if ats_classification is not None:
+                classifications[field.field_id] = ats_classification
+                continue
             classifications[field.field_id] = await classify_field_with_provider(
                 field,
                 self._provider,
@@ -149,6 +169,23 @@ class GenericFormEngine:
                 page_heading=heading,
             )
         return build_form_plan(fields, classifications, self._answers, self._documents)
+
+    def _adapter_page_check(
+        self, snapshot: PageSnapshot, report: FormExecutionReport
+    ) -> EngineStatus | None:
+        """Adapter page classification that ends the run (docs/09)."""
+        if self._adapter is None:
+            return None
+        classification = self._adapter.classify_page(snapshot)
+        if classification.page_type.value == "confirmation":
+            confirmation: ConfirmationResult = self._adapter.verify_confirmation(snapshot)
+            report.confirmation = confirmation.model_dump()
+            return EngineStatus.CONFIRMATION_DETECTED
+        if classification.page_type.value == "application_closed":
+            return EngineStatus.APPLICATION_CLOSED
+        if classification.page_type.value == "review":
+            return EngineStatus.READY_FOR_REVIEW
+        return None
 
     @staticmethod
     def _pause_status(snapshot: PageSnapshot) -> EngineStatus:
@@ -177,13 +214,24 @@ class GenericFormEngine:
         return [], [], False
 
     async def run_review_mode(self, snapshot: PageSnapshot) -> FormExecutionReport:
-        report = FormExecutionReport(status=EngineStatus.MAX_PAGES_REACHED)
+        report = FormExecutionReport(
+            status=EngineStatus.MAX_PAGES_REACHED,
+            adapter_id=self._adapter.metadata.adapter_id if self._adapter else None,
+        )
         processed: set[str] = set()
 
         for page_number in range(1, self._max_pages + 1):
             if snapshot_requires_pause(snapshot):
                 report.status = self._pause_status(snapshot)
                 report.screenshot = str(await self._session.capture_screenshot("paused"))
+                break
+            adapter_status = self._adapter_page_check(snapshot, report)
+            if adapter_status is not None:
+                report.status = adapter_status
+                report.screenshot = str(
+                    await self._session.capture_screenshot(adapter_status.value)
+                )
+                logger.info("Adapter classified page as terminal: %s", adapter_status.value)
                 break
             if is_review_page(snapshot):
                 report.status = EngineStatus.READY_FOR_REVIEW
@@ -201,6 +249,11 @@ class GenericFormEngine:
             page_result = PageResult(
                 page_number=page_number, url=snapshot.url, heading=snapshot.heading
             )
+            if self._adapter is not None:
+                page_result.page_type = self._adapter.classify_page(snapshot).page_type.value
+                control = self._adapter.identify_submission_control(snapshot)
+                if control is not None:
+                    page_result.submission_control = control.action_id
             report.pages.append(page_result)
 
             fillable = [f for f in fields if f.visible and f.field_id not in processed]

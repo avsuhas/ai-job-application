@@ -85,6 +85,7 @@ class PageSnapshot(BaseModel):
     actions: list[FormAction] = Field(default_factory=list)
     signals: SafetySignals = Field(default_factory=SafetySignals)
     validation_errors: list[str] = Field(default_factory=list)
+    frames: list[str] = Field(default_factory=list)
     captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def field(self, field_id: str) -> FormField | None:

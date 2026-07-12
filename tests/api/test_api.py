@@ -133,3 +133,11 @@ class TestBrowserHealth:
         assert "healthy" in body
         assert "chromium_installed" in body
         assert isinstance(body["problems"], list)
+
+
+class TestATSAdapters:
+    def test_adapter_listing(self, client):
+        body = client.get("/api/ats/adapters").json()
+        greenhouse = next(a for a in body if a["adapter_id"] == "greenhouse")
+        assert greenhouse["status"] == "beta"
+        assert greenhouse["capabilities"]["submission"] == "simulated_only"
