@@ -1,0 +1,20 @@
+[
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "career_url": "https://boards.greenhouse.io/anthropic",
+    "enabled": true,
+    "groups": ["ai_companies"],
+    "expected_ats": "greenhouse",
+    "countries": ["United States"]
+  },
+  {
+    "id": "example-lever-company",
+    "name": "Example Lever Company",
+    "career_url": "https://jobs.lever.co/example",
+    "enabled": false,
+    "groups": [],
+    "expected_ats": "lever",
+    "countries": []
+  }
+]

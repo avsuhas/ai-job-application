@@ -1,0 +1,30 @@
+[
+  {
+    "id": "abc-123",
+    "text": "Platform Engineer",
+    "hostedUrl": "https://jobs.lever.co/othercorp/abc-123",
+    "createdAt": 1751500000000,
+    "country": "US",
+    "workplaceType": "remote",
+    "categories": {
+      "location": "Remote - US",
+      "team": "Infrastructure",
+      "commitment": "Full-time"
+    },
+    "descriptionPlain": "Kubernetes, Terraform and AWS platform work. Python a plus."
+  },
+  {
+    "id": "def-456",
+    "text": "Senior Backend Engineer",
+    "hostedUrl": "https://jobs.lever.co/othercorp/def-456",
+    "createdAt": 1751600000000,
+    "country": "",
+    "workplaceType": "onsite",
+    "categories": {
+      "location": "Toronto, Canada",
+      "team": "Backend",
+      "commitment": "Full-time"
+    },
+    "descriptionPlain": "Distributed systems in Go and Python. Kafka experience required."
+  }
+]

@@ -1,0 +1,19 @@
+Alex Sample
+Senior Backend Engineer
+
+EXPERIENCE
+
+ExampleCorp — Senior Backend Engineer (2020–present)
+- Designed and operated distributed order-processing services in Python and Go
+- Reduced p99 latency 40% by introducing async processing with Kafka
+- Led a team of 4 engineers building internal platform tooling
+
+PreviousCo — Backend Engineer (2016–2020)
+- Built REST APIs with FastAPI and PostgreSQL
+- Ran services on AWS with Docker and Kubernetes
+
+SKILLS
+Python, Go, FastAPI, PostgreSQL, Kafka, Redis, AWS, Docker, Kubernetes, Terraform
+
+EDUCATION
+MS Computer Science, Example State University

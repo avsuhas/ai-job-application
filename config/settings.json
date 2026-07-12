@@ -1,0 +1,27 @@
+{
+  "reasoning": {
+    "provider": "claude",
+    "model": "",
+    "max_retries": 3
+  },
+  "browser": {
+    "headless": false,
+    "reuse_profile": true,
+    "default_timeout_ms": 30000
+  },
+  "applications": {
+    "automation_mode": "review",
+    "maximum_batch_size": 10,
+    "capture_screenshots": true,
+    "tailor_resume": true,
+    "generate_cover_letter": false
+  },
+  "job_search": {
+    "max_results_per_source": 100,
+    "minimum_match_score": 60,
+    "hide_already_applied": true
+  },
+  "storage": {
+    "tracker_format": "csv"
+  }
+}

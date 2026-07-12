@@ -1,0 +1,27 @@
+{
+  "personal": {
+    "first_name": "Alex",
+    "last_name": "Sample",
+    "email": "alex.sample@example.com",
+    "phone": "+1-555-0100",
+    "address": "100 Example Street",
+    "city": "Austin",
+    "state": "TX",
+    "country": "United States",
+    "postal_code": "78701"
+  },
+  "employment": {
+    "current_company": "ExampleCorp",
+    "current_title": "Senior Backend Engineer",
+    "years_of_experience": 8
+  },
+  "work_authorization": {
+    "authorized_to_work": true,
+    "requires_sponsorship": false,
+    "visa_status": "US Citizen"
+  },
+  "education": {
+    "highest_degree": "MS Computer Science",
+    "university": "Example State University"
+  }
+}
