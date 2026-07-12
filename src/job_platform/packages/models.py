@@ -22,6 +22,7 @@ class PackageStatus(StrEnum):
     VALIDATING = "validating"
     NEEDS_ATTENTION = "needs_attention"
     READY = "ready"
+    SUBMITTED = "submitted"
     FAILED = "failed"
     CANCELLED = "cancelled"
     ALREADY_APPLIED = "already_applied"

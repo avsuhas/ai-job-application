@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–3 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–4 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -24,10 +24,19 @@ Implemented so far (Phases 0–3 of the [roadmap](docs/17%20-%20Implementation%2
   company/role validation
 - Standard application answers (docs/07C-2): deterministic resolution from the
   CKB with source attribution, provider narratives, explicit unresolved list
-- Local FastAPI service exposing the full discover → rank → prepare workflow
+- Application review (docs/07D-1): deterministic cross-artifact checks —
+  package integrity, staleness, job identity, cross-company contamination,
+  candidate-fact drift, work-authorization contradictions
+- Application readiness (docs/07D-2): staged gating with structured checks,
+  duplicate detection, refresh detection, next-allowed-action guidance
+- Manual handoff (Local Alpha): manual-completion checklist with sensitive-
+  answer flags, per-answer editing with optional save-for-reuse, manual
+  submission recording with accurate source attribution
+- Local FastAPI service exposing the full discover → rank → prepare →
+  review → readiness → manual completion workflow
 
-Not yet implemented: review/readiness services (Phase 4), browser automation
-(Playwright, Phase 5+), form engine, ATS submission adapters, frontend.
+Not yet implemented: browser automation (Playwright, Phase 5+), generic form
+engine, ATS submission adapters, queue orchestration, frontend.
 
 ## Quick start
 

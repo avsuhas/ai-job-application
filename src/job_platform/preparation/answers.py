@@ -209,6 +209,96 @@ NARRATIVE_FAMILIES = [
 ]
 
 
+def edit_prepared_answer(
+    store,
+    manifest,
+    answer_id: str,
+    new_answer: str,
+    question: str = "",
+    save_for_reuse: bool = False,
+    candidate_profile_dir=None,
+) -> PreparedAnswer:
+    """Apply a user edit to one prepared answer (docs/17 Phase 4 acceptance).
+
+    The edited answer becomes user-approved with source ``user_edit``. If it
+    resolves an unresolved question, that question is removed. With
+    ``save_for_reuse`` the answer is also appended to the user's answers.md —
+    the explicit request is the user approval the CKB rules require.
+    """
+    import json as _json
+
+    from job_platform.shared.errors import StorageError
+
+    answers_doc = _json.loads(
+        store.read_artifact(manifest.package_id, "answers/prepared_answers.json")
+    )
+    answers = answers_doc.get("answers", [])
+    target = next((a for a in answers if a["answer_id"] == answer_id), None)
+    if target is not None:
+        target["answer"] = new_answer
+        target["source"] = "user_edit"
+        target["approved"] = True
+        target["confidence"] = 100
+        edited = PreparedAnswer.model_validate(target)
+    else:
+        # An edit may resolve a previously-unresolved question. Match by the
+        # normalized id (families use dots, answer ids use underscores).
+        try:
+            unresolved_doc = _json.loads(
+                store.read_artifact(
+                    manifest.package_id, "answers/unresolved_questions.json"
+                )
+            )
+        except StorageError:
+            unresolved_doc = {"questions": []}
+        questions = unresolved_doc.get("questions", [])
+        normalized = answer_id.replace(".", "_")
+        match = next(
+            (
+                q
+                for q in questions
+                if q.get("question_family", "").replace(".", "_") == normalized
+            ),
+            None,
+        )
+        if match is None:
+            raise StorageError(
+                f"No prepared or unresolved answer '{answer_id}' exists in this package.",
+                details={"package_id": manifest.package_id, "answer_id": answer_id},
+            )
+        family = match["question_family"]
+        edited = PreparedAnswer(
+            answer_id=family.replace(".", "_"),
+            question_family=family,
+            canonical_question=question or family,
+            answer=new_answer,
+            source="user_edit",
+            confidence=100,
+            factual=True,
+            approved=True,
+        )
+        answers.append(edited.model_dump())
+        unresolved_doc["questions"] = [q for q in questions if q is not match]
+        store.write_artifact(
+            manifest,
+            "answers/unresolved_questions.json",
+            _json.dumps(unresolved_doc, indent=2),
+        )
+
+    store.write_artifact(
+        manifest, "answers/prepared_answers.json", _json.dumps(answers_doc, indent=2)
+    )
+    store.save_manifest(manifest)
+
+    if save_for_reuse and candidate_profile_dir is not None:
+        answers_md = candidate_profile_dir / "answers.md"
+        existing = answers_md.read_text(encoding="utf-8") if answers_md.exists() else ""
+        entry = f"\n\n## {edited.canonical_question}\n\n{new_answer}\n"
+        answers_md.write_text(existing.rstrip() + entry, encoding="utf-8")
+        logger.info("Saved edited answer '%s' to answers.md for reuse", edited.question_family)
+    return edited
+
+
 async def prepare_answers(
     provider: ReasoningProvider,
     job: Job,

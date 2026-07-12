@@ -15,6 +15,8 @@ from job_platform.preparation.service import PreparationService
 from job_platform.providers.base import ReasoningProvider
 from job_platform.providers.factory import create_provider
 from job_platform.ranking.ranker import RankingEngine
+from job_platform.readiness.service import ReadinessService
+from job_platform.review.service import ReviewService
 from job_platform.shared.config import Settings
 from job_platform.storage.search_store import SearchStore
 from job_platform.storage.tracker import ApplicationTracker
@@ -55,6 +57,15 @@ class AppState:
         return PreparationService(
             self.provider, self.package_store, self.settings, tracker=self.tracker
         )
+
+    def review_service(self) -> ReviewService:
+        return ReviewService(
+            self.package_store,
+            known_companies=[c.name for c in self.companies],
+        )
+
+    def readiness_service(self) -> ReadinessService:
+        return ReadinessService(self.package_store, tracker=self.tracker)
 
 
 def get_state(request: Request) -> AppState:
