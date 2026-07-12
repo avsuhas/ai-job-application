@@ -1,0 +1,364 @@
+"""Application workflow state machine (docs/08 Execution Orchestrator).
+
+Runs one package through durable stages: validation → lock → readiness →
+browser start → navigation → identity check → form execution → cleanup.
+State persists to ``execution/state.json`` after every stage; retryable
+stages (browser start, navigation) retry with a bounded count; the form
+engine's own step state prevents repeating completed actions after a crash.
+
+Final submission is not a stage — that boundary arrives with Phase 9.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from job_platform.ats.registry import ATSAdapterRegistry
+from job_platform.browser.navigation import NavigationPolicy
+from job_platform.browser.service import BrowserSession
+from job_platform.candidate.context import build_candidate_context
+from job_platform.candidate.models import CandidateBundle
+from job_platform.forms.engine import (
+    EngineStatus,
+    GenericFormEngine,
+    documents_for_package,
+    load_prepared_answers,
+    store_execution_report,
+)
+from job_platform.orchestration.locks import LockManager, LockUnavailableError
+from job_platform.orchestration.models import (
+    StageResult,
+    StageStatus,
+    WorkflowStage,
+    WorkflowState,
+    WorkflowStatus,
+)
+from job_platform.packages.models import PackageManifest, PackageStatus
+from job_platform.packages.store import PackageStore
+from job_platform.readiness.models import ReadinessStage, ReadinessStatus
+from job_platform.readiness.service import ReadinessService
+from job_platform.shared.config import Settings
+from job_platform.shared.errors import BrowserError, NavigationBlockedError
+from job_platform.shared.files import atomic_write_text
+from job_platform.shared.logging import get_logger
+
+logger = get_logger("orchestration.workflow")
+
+STATE_PATH = "execution/state.json"
+BROWSER_STEPS_PATH = "execution/browser_steps.json"
+
+_ENGINE_TO_WORKFLOW = {
+    EngineStatus.READY_FOR_REVIEW: WorkflowStatus.WAITING_FOR_REVIEW,
+    EngineStatus.STOPPED_BEFORE_SUBMIT: WorkflowStatus.WAITING_FOR_REVIEW,
+    EngineStatus.PAUSED_CAPTCHA: WorkflowStatus.WAITING_FOR_USER,
+    EngineStatus.PAUSED_LOGIN: WorkflowStatus.WAITING_FOR_USER,
+    EngineStatus.PAUSED_MFA: WorkflowStatus.WAITING_FOR_USER,
+    EngineStatus.CONFIRMATION_DETECTED: WorkflowStatus.COMPLETED,
+    EngineStatus.APPLICATION_CLOSED: WorkflowStatus.BLOCKED,
+    EngineStatus.NO_APPLICATION_FORM: WorkflowStatus.FAILED,
+    EngineStatus.STOPPED_ACTION_FAILED: WorkflowStatus.FAILED,
+    EngineStatus.STOPPED_NO_PROGRESSION: WorkflowStatus.FAILED,
+    EngineStatus.MAX_PAGES_REACHED: WorkflowStatus.FAILED,
+}
+
+
+class ApplicationWorkflow:
+    def __init__(
+        self,
+        manifest: PackageManifest,
+        bundle: CandidateBundle,
+        store: PackageStore,
+        provider,
+        registry: ATSAdapterRegistry,
+        readiness: ReadinessService,
+        locks: LockManager,
+        settings: Settings,
+        queue_id: str = "",
+        headless: bool | None = None,
+    ) -> None:
+        self._manifest = manifest
+        self._bundle = bundle
+        self._store = store
+        self._provider = provider
+        self._registry = registry
+        self._readiness = readiness
+        self._locks = locks
+        self._settings = settings
+        self._queue_id = queue_id
+        self._headless = headless
+        self._session: BrowserSession | None = None
+        self._package_lock = None
+        self._snapshot = None
+        self._adapter = None
+
+    # -- durable state ---------------------------------------------------- #
+
+    def _state_path(self) -> Path:
+        return self._store.package_dir(self._manifest.package_id) / STATE_PATH
+
+    def _persist(self, state: WorkflowState) -> None:
+        atomic_write_text(self._state_path(), state.model_dump_json(indent=2))
+
+    def load_existing_state(self) -> WorkflowState | None:
+        path = self._state_path()
+        if not path.exists():
+            return None
+        try:
+            return WorkflowState.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - unreadable state is treated as absent
+            logger.warning("Existing workflow state unreadable for %s",
+                           self._manifest.package_id)
+            return None
+
+    # -- run ---------------------------------------------------------------- #
+
+    async def run(self) -> WorkflowState:
+        previous = self.load_existing_state()
+        if previous is not None and previous.status in (
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.RECOVERING,
+            WorkflowStatus.WAITING_FOR_USER,
+        ):
+            state = previous
+            state.status = WorkflowStatus.RECOVERING
+            state.attempt_count += 1
+            logger.info(
+                "Recovering workflow %s (attempt %d)",
+                state.workflow_id,
+                state.attempt_count,
+            )
+        else:
+            state = WorkflowState(
+                package_id=self._manifest.package_id, queue_id=self._queue_id
+            )
+        state.status = (
+            WorkflowStatus.RUNNING
+            if state.status != WorkflowStatus.RECOVERING
+            else WorkflowStatus.RECOVERING
+        )
+        self._persist(state)
+
+        stages = [
+            (WorkflowStage.QUEUE_VALIDATION, self._stage_validation, 1),
+            (WorkflowStage.PACKAGE_LOCK, self._stage_lock, 1),
+            (WorkflowStage.PRE_EXECUTION_READINESS, self._stage_readiness, 1),
+            (
+                WorkflowStage.BROWSER_SESSION_START,
+                self._stage_browser_start,
+                1 + self._settings.browser.max_retries,
+            ),
+            (
+                WorkflowStage.APPLICATION_NAVIGATION,
+                self._stage_navigation,
+                1 + self._settings.browser.max_retries,
+            ),
+            (WorkflowStage.APPLICATION_IDENTITY_CHECK, self._stage_identity, 1),
+            (WorkflowStage.FORM_EXECUTION, self._stage_form_execution, 1),
+        ]
+        try:
+            for stage, handler, max_attempts in stages:
+                result = await self._run_stage(state, stage, handler, max_attempts)
+                if result.status in (StageStatus.SUCCESS, StageStatus.SUCCESS_WITH_WARNINGS):
+                    continue
+                if result.status == StageStatus.WAITING_FOR_REVIEW:
+                    state.status = WorkflowStatus.WAITING_FOR_REVIEW
+                elif result.status == StageStatus.WAITING_FOR_USER:
+                    state.status = WorkflowStatus.WAITING_FOR_USER
+                elif result.stage == WorkflowStage.APPLICATION_IDENTITY_CHECK:
+                    state.status = WorkflowStatus.BLOCKED
+                else:
+                    state.status = WorkflowStatus.FAILED
+                break
+            else:
+                if state.status in (WorkflowStatus.RUNNING, WorkflowStatus.RECOVERING):
+                    state.status = WorkflowStatus.COMPLETED
+        finally:
+            await self._cleanup(state)
+            self._persist(state)
+        return state
+
+    async def _run_stage(
+        self, state: WorkflowState, stage: WorkflowStage, handler, max_attempts: int
+    ) -> StageResult:
+        attempts = 0
+        while True:
+            attempts += 1
+            state.current_stage = stage
+            self._persist(state)
+            result = StageResult(stage=stage, status=StageStatus.SUCCESS)
+            try:
+                await handler(state, result)
+            except LockUnavailableError as exc:
+                result.status = StageStatus.NON_RETRYABLE_FAILURE
+                result.error = exc.message
+            except NavigationBlockedError as exc:
+                result.status = StageStatus.NON_RETRYABLE_FAILURE
+                result.error = exc.message
+            except BrowserError as exc:
+                result.status = StageStatus.RETRYABLE_FAILURE
+                result.retryable = True
+                result.error = exc.message
+            except Exception as exc:  # noqa: BLE001 - stage failures must not crash the queue
+                logger.exception("Stage %s crashed", stage.value)
+                result.status = StageStatus.NON_RETRYABLE_FAILURE
+                result.error = str(exc)
+
+            state.record(result)
+            self._persist(state)
+            if result.status == StageStatus.RETRYABLE_FAILURE and attempts < max_attempts:
+                logger.warning(
+                    "Retrying stage %s (attempt %d/%d): %s",
+                    stage.value,
+                    attempts + 1,
+                    max_attempts,
+                    result.error,
+                )
+                continue
+            return result
+
+    # -- stages ---------------------------------------------------------------- #
+
+    async def _stage_validation(self, state: WorkflowState, result: StageResult) -> None:
+        manifest = self._store.load_manifest(self._manifest.package_id)
+        if manifest.status not in (PackageStatus.READY,):
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = f"Package status is '{manifest.status.value}', not 'ready'."
+
+    async def _stage_lock(self, state: WorkflowState, result: StageResult) -> None:
+        self._package_lock = self._locks.package_lock(self._manifest.package_id)
+        self._package_lock.acquire()
+
+    async def _stage_readiness(self, state: WorkflowState, result: StageResult) -> None:
+        report = self._readiness.evaluate(
+            self._manifest, self._bundle, ReadinessStage.MANUAL_COMPLETION
+        )
+        if report.status not in (
+            ReadinessStatus.READY,
+            ReadinessStatus.READY_WITH_WARNINGS,
+        ):
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = (
+                "Pre-execution readiness failed: "
+                + "; ".join(report.blocking_issues or [report.status.value])
+            )
+        result.warnings = report.warnings
+
+    async def _stage_browser_start(self, state: WorkflowState, result: StageResult) -> None:
+        url = self._manifest.job.application_url
+        policy = NavigationPolicy.for_application(
+            url, allow_local_files=url.startswith("file:")
+        )
+        package_dir = self._store.package_dir(self._manifest.package_id)
+        settings = self._settings.browser.model_copy(
+            update={"headless": self._headless}
+        ) if self._headless is not None else self._settings.browser
+        self._session = BrowserSession(
+            profile_dir=self._settings.paths.browser_profile_dir / state.browser_profile,
+            screenshots_dir=package_dir / "screenshots",
+            policy=policy,
+            settings=settings,
+            allowed_upload_roots=[package_dir, self._settings.paths.candidate_dir],
+        )
+        await self._session.start()
+
+    async def _stage_navigation(self, state: WorkflowState, result: StageResult) -> None:
+        self._snapshot = await self._session.open_page(self._manifest.job.application_url)
+
+    async def _stage_identity(self, state: WorkflowState, result: StageResult) -> None:
+        resolution = self._registry.resolve(self._snapshot.url, self._snapshot)
+        state.ats_adapter = resolution.adapter_id
+        if resolution.adapter_id is None:
+            result.status = StageStatus.SUCCESS_WITH_WARNINGS
+            result.warnings.append(
+                "No dedicated adapter matched; job identity could not be "
+                "verified beyond the trusted URL."
+            )
+            return
+        self._adapter = self._registry.get_adapter(resolution.adapter_id)
+        identity = self._adapter.extract_job_identity(self._snapshot)
+        expected_title = self._manifest.job.title.lower()
+        found_title = identity.title.lower()
+        title_matches = (
+            not found_title
+            or expected_title in found_title
+            or found_title in expected_title
+        )
+        job_id_matches = (
+            not identity.job_id
+            or not self._manifest.job.job_id
+            or identity.job_id == self._manifest.job.job_id
+        )
+        if not (title_matches and job_id_matches):
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = (
+                f"Job identity mismatch: page shows {identity.title!r} "
+                f"(job_id={identity.job_id!r}) but the package targets "
+                f"{self._manifest.job.title!r} (job_id={self._manifest.job.job_id!r})."
+            )
+
+    async def _stage_form_execution(self, state: WorkflowState, result: StageResult) -> None:
+        answers = load_prepared_answers(self._store, self._manifest)
+        documents = documents_for_package(self._manifest, self._store, self._bundle)
+        package_dir = self._store.package_dir(self._manifest.package_id)
+        engine = GenericFormEngine(
+            self._session,
+            self._provider,
+            answers,
+            documents=documents,
+            candidate_context=build_candidate_context(
+                self._bundle,
+                resume=self._bundle.resumes[0] if self._bundle.resumes else None,
+            ),
+            adapter=self._adapter,
+            state_file=package_dir / BROWSER_STEPS_PATH,
+        )
+        report = await engine.run_review_mode(self._snapshot)
+        store_execution_report(self._store, self._manifest, report)
+        state.engine_status = report.status.value
+
+        workflow_status = _ENGINE_TO_WORKFLOW.get(report.status, WorkflowStatus.FAILED)
+        if workflow_status == WorkflowStatus.WAITING_FOR_REVIEW:
+            result.status = StageStatus.WAITING_FOR_REVIEW
+        elif workflow_status == WorkflowStatus.WAITING_FOR_USER:
+            result.status = StageStatus.WAITING_FOR_USER
+        elif workflow_status == WorkflowStatus.BLOCKED:
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = f"The application page is not usable: {report.status.value}."
+        elif workflow_status == WorkflowStatus.FAILED:
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = f"Form execution ended with '{report.status.value}'."
+
+    async def _cleanup(self, state: WorkflowState) -> None:
+        if self._session is not None:
+            try:
+                await self._session.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("Browser session close failed during cleanup.")
+            self._session = None
+        if self._package_lock is not None:
+            self._package_lock.release()
+            self._package_lock = None
+
+
+def read_workflow_state(store: PackageStore, package_id: str) -> WorkflowState | None:
+    path = store.package_dir(package_id) / STATE_PATH
+    if not path.exists():
+        return None
+    try:
+        return WorkflowState.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def has_unresolved_execution(store: PackageStore, package_id: str) -> bool:
+    """True when a prior run ended in a state that must be resolved first."""
+    state = read_workflow_state(store, package_id)
+    if state is None:
+        return False
+    return state.status.value == "submission_unknown"
+
+
+def workflow_state_json(store: PackageStore, package_id: str) -> dict | None:
+    state = read_workflow_state(store, package_id)
+    return json.loads(state.model_dump_json()) if state else None

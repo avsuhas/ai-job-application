@@ -15,6 +15,7 @@ from job_platform.api.routes import (
     candidate,
     companies,
     history,
+    queue,
     searches,
     system,
 )
@@ -61,6 +62,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configure_logging(settings.paths.logs_dir)
         state = AppState.build(settings)
         state.tracker.initialize()
+        recovered = state.queue_manager().recover_interrupted()
+        if recovered:
+            logger.warning(
+                "Recovered %d interrupted queue(s) after restart: %s",
+                len(recovered),
+                recovered,
+            )
         app.state.container = state
         logger.info(
             "job-platform %s started (provider=%s, companies=%d)",
@@ -89,4 +97,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(history.router)
     app.include_router(browser.router)
     app.include_router(ats.router)
+    app.include_router(queue.router)
     return app

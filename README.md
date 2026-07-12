@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–7 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–8 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -49,11 +49,18 @@ Implemented so far (Phases 0–7 of the [roadmap](docs/17%20-%20Implementation%2
   extraction, exact field-id semantics, submission-control identification
   (never clicked), simulated confirmation verification, registry with
   priority resolution and safe generic fallback
+- Queue and execution orchestration (docs/08): admission control with
+  rejection reasons, sequential queue over one browser profile, durable
+  workflow state machine (validation → lock → readiness → browser →
+  navigation → identity check → form execution) persisted after every stage,
+  package and profile file locks with stale-lock recovery, bounded retries,
+  crash recovery that never repeats completed actions, failure isolation,
+  pause/resume/cancel/skip, event stream, restart recovery
 - Local FastAPI service exposing the full discover → rank → prepare →
-  review → readiness → manual completion workflow
+  review → readiness → queue → review-mode execution workflow
 
-Not yet implemented: queue orchestration (Phase 8), automated submission and
-verification (Phase 9+), additional ATS adapters, frontend.
+Not yet implemented: automated submission and verification (Phase 9+),
+review-mode release hardening (Phase 10+), additional ATS adapters, frontend.
 
 ## Quick start
 

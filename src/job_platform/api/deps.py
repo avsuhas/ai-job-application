@@ -12,6 +12,11 @@ from job_platform.candidate.loader import load_candidate_bundle
 from job_platform.candidate.models import CandidateBundle
 from job_platform.jobs.service import DiscoveryService
 from job_platform.jobs.sources import CompanySource, load_company_sources
+from job_platform.orchestration.admission import QueueAdmissionController
+from job_platform.orchestration.locks import LockManager
+from job_platform.orchestration.models import WorkflowState
+from job_platform.orchestration.queue import QueueManager
+from job_platform.orchestration.workflow import ApplicationWorkflow
 from job_platform.packages.store import PackageStore
 from job_platform.preparation.service import PreparationService
 from job_platform.providers.base import ReasoningProvider
@@ -70,6 +75,41 @@ class AppState:
 
     def readiness_service(self) -> ReadinessService:
         return ReadinessService(self.package_store, tracker=self.tracker)
+
+    def lock_manager(self) -> LockManager:
+        return LockManager(
+            self.settings.paths.packages_dir,
+            self.settings.paths.browser_profile_dir,
+        )
+
+    async def _run_workflow(self, package_id: str, queue_id: str) -> WorkflowState:
+        manifest = self.package_store.load_manifest(package_id)
+        workflow = ApplicationWorkflow(
+            manifest=manifest,
+            bundle=self.candidate_bundle(),
+            store=self.package_store,
+            provider=self.provider,
+            registry=self.ats_registry,
+            readiness=self.readiness_service(),
+            locks=self.lock_manager(),
+            settings=self.settings,
+            queue_id=queue_id,
+        )
+        return await workflow.run()
+
+    def queue_manager(self) -> QueueManager:
+        if not hasattr(self, "_queue_manager"):
+            locks = self.lock_manager()
+            self._queue_manager = QueueManager(
+                queues_dir=self.settings.paths.queues_dir,
+                package_store=self.package_store,
+                admission=QueueAdmissionController(
+                    self.package_store, self.readiness_service(), locks
+                ),
+                locks=locks,
+                workflow_runner=self._run_workflow,
+            )
+        return self._queue_manager
 
 
 def get_state(request: Request) -> AppState:

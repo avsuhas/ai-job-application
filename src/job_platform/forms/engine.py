@@ -14,11 +14,17 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from job_platform.browser.models import ActionResult, ActionStatus, PageSnapshot
+from job_platform.browser.models import (
+    ActionResult,
+    ActionStatus,
+    ExecutionState,
+    PageSnapshot,
+)
 
 if TYPE_CHECKING:  # avoid a runtime import cycle with the ats package
     from job_platform.ats.base import ATSAdapter, ConfirmationResult
@@ -141,6 +147,7 @@ class GenericFormEngine:
         max_pages: int = 8,
         max_dynamic_rounds: int = 3,
         adapter: ATSAdapter | None = None,
+        state_file: Path | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -150,6 +157,27 @@ class GenericFormEngine:
         self._max_pages = max_pages
         self._max_dynamic_rounds = max_dynamic_rounds
         self._adapter = adapter
+        self._state_file = state_file
+
+    def _load_execution_state(self) -> ExecutionState:
+        """Persistent step state so a crashed run never repeats completed
+        actions (docs/08 checkpoints, docs/17 Phase 8 exit gate)."""
+        if self._state_file is not None and self._state_file.exists():
+            try:
+                return BrowserSession.load_execution_state(self._state_file)
+            except Exception:  # noqa: BLE001 - unreadable state restarts cleanly
+                logger.warning("Browser step state was unreadable; starting fresh.")
+        return ExecutionState()
+
+    async def _execute(self, plan, snapshot, exec_state, page_number: int):
+        # Rewrite step ids to a stable page+field+action identity so
+        # skip-tracking is unique across pages and dynamic rounds, and
+        # reproducible across recovery runs.
+        for step in plan.steps:
+            step.step_id = f"page{page_number}_{step.field_id}_{step.action.value}"
+        return await self._session.execute_plan(
+            plan, snapshot, exec_state, self._state_file
+        )
 
     async def _plan_for_fields(self, fields, heading: str) -> FormPlan:
         classifications = {}
@@ -219,6 +247,7 @@ class GenericFormEngine:
             adapter_id=self._adapter.metadata.adapter_id if self._adapter else None,
         )
         processed: set[str] = set()
+        exec_state = self._load_execution_state()
 
         for page_number in range(1, self._max_pages + 1):
             if snapshot_requires_pause(snapshot):
@@ -259,10 +288,12 @@ class GenericFormEngine:
             fillable = [f for f in fields if f.visible and f.field_id not in processed]
             form_plan = await self._plan_for_fields(fillable, snapshot.heading)
             page_result.entries.extend(form_plan.entries)
-            results = await self._session.execute_plan(form_plan.plan, snapshot)
+            results = await self._execute(form_plan.plan, snapshot, exec_state, page_number)
             page_result.action_results.extend(results)
             processed.update(
-                r.field_id for r in results if r.status == ActionStatus.SUCCESS
+                r.field_id
+                for r in results
+                if r.status in (ActionStatus.SUCCESS, ActionStatus.SKIPPED)
             )
             if any(r.status == ActionStatus.FAILED for r in results):
                 report.status = EngineStatus.STOPPED_ACTION_FAILED
@@ -284,10 +315,14 @@ class GenericFormEngine:
                 page_result.dynamic_rounds += 1
                 extra_plan = await self._plan_for_fields(new_fields, snapshot.heading)
                 page_result.entries.extend(extra_plan.entries)
-                extra_results = await self._session.execute_plan(extra_plan.plan, snapshot)
+                extra_results = await self._execute(
+                    extra_plan.plan, snapshot, exec_state, page_number
+                )
                 page_result.action_results.extend(extra_results)
                 processed.update(
-                    r.field_id for r in extra_results if r.status == ActionStatus.SUCCESS
+                    r.field_id
+                    for r in extra_results
+                    if r.status in (ActionStatus.SUCCESS, ActionStatus.SKIPPED)
                 )
                 if not extra_plan.plan.steps:
                     break

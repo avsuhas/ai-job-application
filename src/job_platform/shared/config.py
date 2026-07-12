@@ -33,6 +33,7 @@ class BrowserSettings(BaseModel):
     reuse_profile: bool = True
     slow_motion_ms: int = 0
     default_timeout_ms: int = 30_000
+    max_retries: int = 2
 
 
 class ApplicationSettings(BaseModel):
@@ -85,6 +86,10 @@ class PathSettings(BaseModel):
         return self.applications_dir / "packages"
 
     @property
+    def queues_dir(self) -> Path:
+        return self.applications_dir / "queues"
+
+    @property
     def searches_dir(self) -> Path:
         return self.data_root / "searches" / "results"
 
@@ -109,6 +114,7 @@ class PathSettings(BaseModel):
             self.generated_dir / "cover_letters",
             self.generated_dir / "answers",
             self.packages_dir,
+            self.queues_dir,
             self.searches_dir,
             self.data_root / "searches" / "saved",
             self.browser_profile_dir,
