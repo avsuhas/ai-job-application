@@ -8,7 +8,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from job_platform.api.deps import AppState
-from job_platform.api.routes import candidate, companies, history, searches, system
+from job_platform.api.routes import (
+    applications,
+    candidate,
+    companies,
+    history,
+    searches,
+    system,
+)
 from job_platform.shared.config import Settings, load_settings
 from job_platform.shared.errors import (
     CandidateDataError,
@@ -76,5 +83,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(candidate.router)
     app.include_router(companies.router)
     app.include_router(searches.router)
+    app.include_router(applications.router)
     app.include_router(history.router)
     return app

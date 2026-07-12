@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–2 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–3 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -16,10 +16,18 @@ Implemented so far (Phases 0–2 of the [roadmap](docs/17%20-%20Implementation%2
 - Job discovery via Greenhouse and Lever adapters, normalization, deduplication
 - Deterministic eligibility filtering plus Claude-based job ranking
 - CSV application tracker with duplicate detection
-- Local FastAPI service exposing the workflow
+- Application Packages (docs/07A): versioned manifests, immutable job and
+  candidate snapshots, artifact fingerprints, staleness detection
+- Resume preparation (docs/07B): base resume selection, provider tailoring,
+  deterministic factual validation with fallback to the base resume
+- Cover letters (docs/07C-1): policy-driven requirement detection, generation,
+  company/role validation
+- Standard application answers (docs/07C-2): deterministic resolution from the
+  CKB with source attribution, provider narratives, explicit unresolved list
+- Local FastAPI service exposing the full discover → rank → prepare workflow
 
-Not yet implemented: browser automation (Playwright), form engine, ATS
-submission adapters, application packages, review/readiness workflows, frontend.
+Not yet implemented: review/readiness services (Phase 4), browser automation
+(Playwright, Phase 5+), form engine, ATS submission adapters, frontend.
 
 ## Quick start
 

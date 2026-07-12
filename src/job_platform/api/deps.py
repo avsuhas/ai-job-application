@@ -10,6 +10,8 @@ from job_platform.candidate.loader import load_candidate_bundle
 from job_platform.candidate.models import CandidateBundle
 from job_platform.jobs.service import DiscoveryService
 from job_platform.jobs.sources import CompanySource, load_company_sources
+from job_platform.packages.store import PackageStore
+from job_platform.preparation.service import PreparationService
 from job_platform.providers.base import ReasoningProvider
 from job_platform.providers.factory import create_provider
 from job_platform.ranking.ranker import RankingEngine
@@ -25,6 +27,7 @@ class AppState:
     discovery: DiscoveryService
     tracker: ApplicationTracker
     search_store: SearchStore
+    package_store: PackageStore
     companies: list[CompanySource] = field(default_factory=list)
     _bundle: CandidateBundle | None = None
 
@@ -36,6 +39,7 @@ class AppState:
             discovery=DiscoveryService(),
             tracker=ApplicationTracker(settings.paths.tracker_path),
             search_store=SearchStore(settings.paths.searches_dir),
+            package_store=PackageStore(settings.paths.packages_dir),
             companies=load_company_sources(settings.companies_path),
         )
 
@@ -46,6 +50,11 @@ class AppState:
 
     def ranking_engine(self) -> RankingEngine:
         return RankingEngine(self.provider)
+
+    def preparation_service(self) -> PreparationService:
+        return PreparationService(
+            self.provider, self.package_store, self.settings, tracker=self.tracker
+        )
 
 
 def get_state(request: Request) -> AppState:

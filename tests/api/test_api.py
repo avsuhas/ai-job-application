@@ -1,63 +1,10 @@
 """API integration tests: full discover → rank → history workflow with the
-mock provider and mocked ATS HTTP endpoints."""
-
-import json
+mock provider and mocked ATS HTTP endpoints. Fixtures live in conftest.py."""
 
 import httpx
-import pytest
 import respx
-from fastapi.testclient import TestClient
 
-from job_platform.api.app import create_app
-from job_platform.shared.config import Settings
-
-GREENHOUSE_URL = "https://boards-api.greenhouse.io/v1/boards/exampleco/jobs"
-
-
-@pytest.fixture
-def client(tmp_path, candidate_dir, fixtures_dir, monkeypatch):
-    """App wired to temp dirs, fixture candidate data, and the mock provider."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    data_root = tmp_path / "user_data"
-    (data_root / "candidate").parent.mkdir(parents=True, exist_ok=True)
-    import shutil
-
-    shutil.copytree(candidate_dir, data_root / "candidate")
-
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "companies.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "exampleco",
-                    "name": "ExampleCo",
-                    "career_url": "https://boards.greenhouse.io/exampleco",
-                    "enabled": True,
-                },
-                {
-                    "id": "unsupported",
-                    "name": "CustomSite",
-                    "career_url": "https://careers.custom.com",
-                    "enabled": True,
-                },
-            ]
-        )
-    )
-
-    settings = Settings(
-        reasoning={"provider": "mock"},
-        paths={"data_root": data_root},
-        config_dir=config_dir,
-    )
-    app = create_app(settings)
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def greenhouse_payload(fixtures_dir):
-    return json.loads((fixtures_dir / "jobs" / "greenhouse_board.json").read_text())
+from tests.api.conftest import GREENHOUSE_URL
 
 
 class TestSystem:

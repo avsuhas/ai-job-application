@@ -17,6 +17,16 @@ from pydantic import BaseModel, ValidationError
 from job_platform.jobs.models import Job, JobAnalysis
 from job_platform.providers.base import JobRankingRequest, ReasoningProvider
 from job_platform.providers.prompts import PromptService
+from job_platform.providers.tasks import (
+    CoverLetterDraft,
+    CoverLetterRequest,
+    NarrativeAnswerRequest,
+    NarrativeAnswerResult,
+    ResumeSelectionRequest,
+    ResumeSelectionResult,
+    ResumeTailoringRequest,
+    ResumeTailoringResult,
+)
 from job_platform.ranking.models import JobMatchResult
 from job_platform.shared.config import Settings
 from job_platform.shared.errors import ProviderError, ProviderResponseError
@@ -191,4 +201,64 @@ class ClaudeProvider(ReasoningProvider):
                 "job_analysis": request.analysis.model_dump_json(indent=2),
             },
             JobMatchResult,
+        )
+
+    async def select_resume(self, request: ResumeSelectionRequest) -> ResumeSelectionResult:
+        return await self._structured_task(
+            "resume_selection",
+            {
+                "candidate_rules": request.candidate_rules or "None provided.",
+                "resume_inventory": request.resume_inventory,
+                "company": request.job.company,
+                "title": request.job.title,
+                "job_analysis": request.analysis.model_dump_json(indent=2),
+            },
+            ResumeSelectionResult,
+        )
+
+    async def tailor_resume(self, request: ResumeTailoringRequest) -> ResumeTailoringResult:
+        return await self._structured_task(
+            "resume_tailoring",
+            {
+                "candidate_context": request.candidate_context,
+                "candidate_rules": request.candidate_rules or "None provided.",
+                "resume_text": request.resume_text,
+                "company": request.job.company,
+                "title": request.job.title,
+                "job_analysis": request.analysis.model_dump_json(indent=2),
+            },
+            ResumeTailoringResult,
+        )
+
+    async def generate_cover_letter(self, request: CoverLetterRequest) -> CoverLetterDraft:
+        return await self._structured_task(
+            "cover_letter",
+            {
+                "max_words": str(request.max_words),
+                "excluded_topics": ", ".join(request.excluded_topics) or "nothing specific",
+                "candidate_context": request.candidate_context,
+                "template": request.template or "None provided.",
+                "company": request.job.company,
+                "title": request.job.title,
+                "job_analysis": request.analysis.model_dump_json(indent=2),
+            },
+            CoverLetterDraft,
+        )
+
+    async def generate_application_answer(
+        self, request: NarrativeAnswerRequest
+    ) -> NarrativeAnswerResult:
+        return await self._structured_task(
+            "answer_generation",
+            {
+                "character_limit": (
+                    str(request.character_limit) if request.character_limit else "none"
+                ),
+                "candidate_context": request.candidate_context,
+                "question_family": request.question_family,
+                "question": request.canonical_question,
+                "company": request.job.company,
+                "title": request.job.title,
+            },
+            NarrativeAnswerResult,
         )

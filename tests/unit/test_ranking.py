@@ -4,7 +4,7 @@ import pytest
 
 from job_platform.candidate.loader import load_candidate_bundle
 from job_platform.jobs.models import Job, JobAnalysis
-from job_platform.providers.base import JobRankingRequest, ReasoningProvider
+from job_platform.providers.base import JobRankingRequest
 from job_platform.providers.mock import MockReasoningProvider
 from job_platform.ranking.eligibility import eligibility_flags
 from job_platform.ranking.models import (
@@ -14,6 +14,7 @@ from job_platform.ranking.models import (
 )
 from job_platform.ranking.ranker import RankingEngine
 from job_platform.shared.errors import ProviderError
+from tests.conftest import StubProvider
 
 
 def make_job(i: int, description: str = "Python, Kafka, AWS work") -> Job:
@@ -76,7 +77,7 @@ class TestEligibility:
         assert eligibility_flags(analysis, bundle) == []
 
 
-class FailingProvider(ReasoningProvider):
+class FailingProvider(StubProvider):
     name = "failing"
 
     async def analyze_job(self, job):
@@ -86,7 +87,7 @@ class FailingProvider(ReasoningProvider):
         raise AssertionError("should not be called")
 
 
-class ScriptedProvider(ReasoningProvider):
+class ScriptedProvider(StubProvider):
     """Returns fixed scores per job id so sorting can be asserted."""
 
     name = "scripted"
