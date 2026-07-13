@@ -76,6 +76,8 @@ class ApplicationWorkflow:
         settings: Settings,
         queue_id: str = "",
         headless: bool | None = None,
+        submit_mode: bool = False,
+        submission_service=None,
     ) -> None:
         self._manifest = manifest
         self._bundle = bundle
@@ -87,10 +89,15 @@ class ApplicationWorkflow:
         self._settings = settings
         self._queue_id = queue_id
         self._headless = headless
+        self._submit_mode = submit_mode
+        self._submission_service = submission_service
+        if submit_mode and submission_service is None:
+            raise ValueError("submit_mode requires a submission_service")
         self._session: BrowserSession | None = None
         self._package_lock = None
         self._snapshot = None
         self._adapter = None
+        self._submission_outcome: str = ""
 
     # -- durable state ---------------------------------------------------- #
 
@@ -143,6 +150,14 @@ class ApplicationWorkflow:
             (WorkflowStage.QUEUE_VALIDATION, self._stage_validation, 1),
             (WorkflowStage.PACKAGE_LOCK, self._stage_lock, 1),
             (WorkflowStage.PRE_EXECUTION_READINESS, self._stage_readiness, 1),
+        ]
+        if self._submit_mode:
+            # Approval is verified before any browser work (docs/17 Phase 10:
+            # approval bound to the reviewed snapshot).
+            stages.append(
+                (WorkflowStage.USER_APPROVAL_CHECK, self._stage_approval_check, 1)
+            )
+        stages += [
             (
                 WorkflowStage.BROWSER_SESSION_START,
                 self._stage_browser_start,
@@ -156,6 +171,10 @@ class ApplicationWorkflow:
             (WorkflowStage.APPLICATION_IDENTITY_CHECK, self._stage_identity, 1),
             (WorkflowStage.FORM_EXECUTION, self._stage_form_execution, 1),
         ]
+        if self._submit_mode:
+            stages.append(
+                (WorkflowStage.FINAL_SUBMISSION, self._stage_final_submission, 1)
+            )
         try:
             for stage, handler, max_attempts in stages:
                 result = await self._run_stage(state, stage, handler, max_attempts)
@@ -165,6 +184,8 @@ class ApplicationWorkflow:
                     state.status = WorkflowStatus.WAITING_FOR_REVIEW
                 elif result.status == StageStatus.WAITING_FOR_USER:
                     state.status = WorkflowStatus.WAITING_FOR_USER
+                elif result.status == StageStatus.SUBMISSION_UNKNOWN:
+                    state.status = WorkflowStatus.SUBMISSION_UNKNOWN
                 elif result.stage == WorkflowStage.APPLICATION_IDENTITY_CHECK:
                     state.status = WorkflowStatus.BLOCKED
                 else:
@@ -172,7 +193,11 @@ class ApplicationWorkflow:
                 break
             else:
                 if state.status in (WorkflowStatus.RUNNING, WorkflowStatus.RECOVERING):
-                    state.status = WorkflowStatus.COMPLETED
+                    state.status = (
+                        WorkflowStatus.SUBMITTED
+                        if self._submit_mode and self._submission_outcome == "submitted"
+                        else WorkflowStatus.COMPLETED
+                    )
         finally:
             await self._cleanup(state)
             self._persist(state)
@@ -297,10 +322,29 @@ class ApplicationWorkflow:
                 f"{self._manifest.job.title!r} (job_id={self._manifest.job.job_id!r})."
             )
 
+    async def _stage_approval_check(self, state: WorkflowState, result: StageResult) -> None:
+        from job_platform.review.approval import ApprovalError, verify_approval
+
+        try:
+            approval = verify_approval(self._store, self._manifest)
+        except ApprovalError as exc:
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = exc.message
+            return
+        result.warnings.append(
+            f"Approved by {approval.approved_by} at {approval.approved_at.isoformat()}"
+        )
+
     async def _stage_form_execution(self, state: WorkflowState, result: StageResult) -> None:
         answers = load_prepared_answers(self._store, self._manifest)
         documents = documents_for_package(self._manifest, self._store, self._bundle)
         package_dir = self._store.package_dir(self._manifest.package_id)
+        state_file = package_dir / BROWSER_STEPS_PATH
+        if self._submit_mode:
+            # A submission run is a deliberate fresh execution: the approval
+            # validated the recorded materials; the page must be refilled, so
+            # crash-recovery skip state from the review run must not apply.
+            state_file.unlink(missing_ok=True)
         engine = GenericFormEngine(
             self._session,
             self._provider,
@@ -311,14 +355,20 @@ class ApplicationWorkflow:
                 resume=self._bundle.resumes[0] if self._bundle.resumes else None,
             ),
             adapter=self._adapter,
-            state_file=package_dir / BROWSER_STEPS_PATH,
+            state_file=state_file,
         )
         report = await engine.run_review_mode(self._snapshot)
-        store_execution_report(self._store, self._manifest, report)
+        if not self._submit_mode:
+            store_execution_report(self._store, self._manifest, report)
         state.engine_status = report.status.value
 
         workflow_status = _ENGINE_TO_WORKFLOW.get(report.status, WorkflowStatus.FAILED)
         if workflow_status == WorkflowStatus.WAITING_FOR_REVIEW:
+            if self._submit_mode:
+                # The form is filled and stopped at the final control —
+                # exactly the state the submission stage needs.
+                self._snapshot = await self._session.inspect_page()
+                return
             result.status = StageStatus.WAITING_FOR_REVIEW
         elif workflow_status == WorkflowStatus.WAITING_FOR_USER:
             result.status = StageStatus.WAITING_FOR_USER
@@ -328,6 +378,42 @@ class ApplicationWorkflow:
         elif workflow_status == WorkflowStatus.FAILED:
             result.status = StageStatus.NON_RETRYABLE_FAILURE
             result.error = f"Form execution ended with '{report.status.value}'."
+        elif self._submit_mode:
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = (
+                f"Submission requires a filled form awaiting the final control, "
+                f"but the run ended with '{report.status.value}'."
+            )
+
+    async def _stage_final_submission(self, state: WorkflowState, result: StageResult) -> None:
+        from job_platform.submission.models import SubmissionOutcome
+        from job_platform.submission.service import SubmissionBlockedError
+
+        try:
+            attempt = await self._submission_service.submit(
+                self._session,
+                self._manifest,
+                self._snapshot,
+                adapter=self._adapter,
+                approved=True,
+                workflow_id=state.workflow_id,
+            )
+        except SubmissionBlockedError as exc:
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = exc.message
+            return
+        verification = attempt.verification_result
+        outcome = verification.outcome if verification else SubmissionOutcome.SUBMISSION_UNKNOWN
+        self._submission_outcome = outcome.value
+        state.engine_status = f"submission_{outcome.value}"
+        if outcome == SubmissionOutcome.SUBMITTED:
+            return
+        if outcome == SubmissionOutcome.SUBMISSION_UNKNOWN:
+            result.status = StageStatus.SUBMISSION_UNKNOWN
+            result.error = verification.notes if verification else "outcome unknown"
+            return
+        result.status = StageStatus.NON_RETRYABLE_FAILURE
+        result.error = f"Submission ended with '{outcome.value}'."
 
     async def _cleanup(self, state: WorkflowState) -> None:
         if self._session is not None:

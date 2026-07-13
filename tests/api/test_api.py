@@ -141,3 +141,54 @@ class TestATSAdapters:
         greenhouse = next(a for a in body if a["adapter_id"] == "greenhouse")
         assert greenhouse["status"] == "beta"
         assert greenhouse["capabilities"]["submission"] == "simulated_only"
+
+
+class TestHistoryExport:
+    def test_xlsx_export_and_events(self, client):
+        record = {"company": "A", "job_title": "Engineer", "job_id": "9"}
+        client.post("/api/history", json=record)
+        export = client.get("/api/history/export").json()
+        assert export["format"] == "xlsx"
+        assert export["records"] == 1
+
+        from pathlib import Path
+        assert Path(export["path"]).exists()
+
+    def test_submission_status_endpoint_requires_package(self, client):
+        assert client.get("/api/applications/nope_1_2/submission").status_code == 404
+
+
+class TestPhase10Endpoints:
+    def test_ui_dashboard_served(self, client):
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "Job Platform" in response.text
+        assert "/api/applications" in response.text
+
+    def test_backup_and_audit(self, client):
+        backup = client.post("/api/system/backup")
+        assert backup.status_code == 201
+        assert backup.json()["file_count"] > 0
+        listing = client.get("/api/system/backups").json()
+        assert listing["count"] == 1
+
+        audit = client.get("/api/system/audit").json()
+        assert audit["ok"] is True
+
+    def test_approve_requires_reviewed_execution(self, client, greenhouse_payload):
+        import httpx as _httpx
+        import respx as _respx
+        with _respx.mock:
+            _respx.get(GREENHOUSE_URL).mock(
+                return_value=_httpx.Response(200, json=greenhouse_payload)
+            )
+            search_id = client.post("/api/searches?wait=true", json={}).json()["search_id"]
+        job_id = client.get(f"/api/searches/{search_id}/jobs").json()["jobs"][0]["job"]["id"]
+        package_id = client.post(
+            "/api/applications/prepare", json={"search_id": search_id, "job_id": job_id}
+        ).json()["package_id"]
+
+        # No review-mode execution has happened -> approval refused with 409
+        response = client.post(f"/api/applications/{package_id}/approve", json={})
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "approval_error"

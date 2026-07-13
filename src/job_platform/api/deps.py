@@ -27,6 +27,8 @@ from job_platform.review.service import ReviewService
 from job_platform.shared.config import Settings
 from job_platform.storage.search_store import SearchStore
 from job_platform.storage.tracker import ApplicationTracker
+from job_platform.submission.history import ApplicationHistoryService
+from job_platform.submission.service import SubmissionService
 
 
 @dataclass
@@ -82,7 +84,19 @@ class AppState:
             self.settings.paths.browser_profile_dir,
         )
 
-    async def _run_workflow(self, package_id: str, queue_id: str) -> WorkflowState:
+    def history_service(self) -> ApplicationHistoryService:
+        return ApplicationHistoryService(
+            self.tracker,
+            self.settings.paths.applications_dir / "history_events.jsonl",
+            self.settings.paths.applications_dir / "tracker.xlsx",
+        )
+
+    def submission_service(self) -> SubmissionService:
+        return SubmissionService(self.package_store, self.tracker, self.history_service())
+
+    async def _run_workflow(
+        self, package_id: str, queue_id: str, submit: bool = False
+    ) -> WorkflowState:
         manifest = self.package_store.load_manifest(package_id)
         workflow = ApplicationWorkflow(
             manifest=manifest,
@@ -94,8 +108,20 @@ class AppState:
             locks=self.lock_manager(),
             settings=self.settings,
             queue_id=queue_id,
+            submit_mode=submit,
+            submission_service=self.submission_service() if submit else None,
         )
         return await workflow.run()
+
+    async def run_submission_workflow(self, package_id: str) -> WorkflowState:
+        """Run the approved-submission workflow for one package, holding the
+        browser profile lock like a queue run would."""
+        profile_lock = self.lock_manager().profile_lock("default")
+        profile_lock.acquire()
+        try:
+            return await self._run_workflow(package_id, queue_id="", submit=True)
+        finally:
+            profile_lock.release()
 
     def queue_manager(self) -> QueueManager:
         if not hasattr(self, "_queue_manager"):

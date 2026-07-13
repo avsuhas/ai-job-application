@@ -166,6 +166,87 @@ class ManualSubmission(BaseModel):
     notes: str = ""
 
 
+class ApprovalRequest(BaseModel):
+    approved_by: str = "user"
+
+
+@router.post("/api/applications/{package_id}/approve", status_code=201)
+def approve_application(
+    package_id: str,
+    request: ApprovalRequest,
+    state: AppState = Depends(get_state),
+) -> dict:
+    from job_platform.review.approval import create_approval
+
+    manifest = state.package_store.load_manifest(package_id)
+    approval = create_approval(state.package_store, manifest, request.approved_by)
+    return approval.model_dump(mode="json")
+
+
+@router.delete("/api/applications/{package_id}/approve")
+def revoke_application_approval(
+    package_id: str, state: AppState = Depends(get_state)
+) -> dict:
+    from job_platform.review.approval import revoke_approval
+
+    state.package_store.load_manifest(package_id)
+    revoke_approval(state.package_store, package_id)
+    return {"package_id": package_id, "approval_revoked": True}
+
+
+@router.post("/api/applications/{package_id}/submit")
+async def submit_application(
+    package_id: str, state: AppState = Depends(get_state)
+) -> dict:
+    """Run the approved-submission workflow: approval check → refill →
+    final click → verification → history (docs/17 Phase 10)."""
+    state.package_store.load_manifest(package_id)
+    workflow_state = await state.run_submission_workflow(package_id)
+    return {
+        "package_id": package_id,
+        "workflow_id": workflow_state.workflow_id,
+        "status": workflow_state.status.value,
+        "engine_status": workflow_state.engine_status,
+        "errors": [r.error for r in workflow_state.stage_results if r.error],
+    }
+
+
+@router.get("/api/applications/{package_id}/submission")
+def get_submission_status(package_id: str, state: AppState = Depends(get_state)) -> dict:
+    from job_platform.submission.service import submission_status
+
+    state.package_store.load_manifest(package_id)  # 404 on unknown package
+    return submission_status(
+        state.package_store, state.submission_service(), package_id
+    )
+
+
+class UnknownResolutionRequest(BaseModel):
+    resolved_status: str = Field(
+        pattern="^(submitted|failed|already_applied|application_closed)$"
+    )
+    resolution_source: str = "user_confirmation"
+    notes: str = ""
+
+
+@router.post("/api/applications/{package_id}/submission/resolve")
+def resolve_submission_unknown(
+    package_id: str,
+    request: UnknownResolutionRequest,
+    state: AppState = Depends(get_state),
+) -> dict:
+    from job_platform.submission.models import SubmissionOutcome
+
+    manifest = state.package_store.load_manifest(package_id)
+    resolution = state.submission_service().resolve_unknown(
+        manifest,
+        SubmissionOutcome(request.resolved_status),
+        request.resolution_source,
+        notes=request.notes,
+    )
+    return resolution.model_dump(mode="json")
+
+
 @router.post("/api/applications/{package_id}/mark-submitted", status_code=201)
 def mark_submitted(
     package_id: str,

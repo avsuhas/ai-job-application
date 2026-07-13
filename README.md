@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–8 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)):
+Implemented so far (Phases 0–10 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **Review-Mode Beta**:
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -56,11 +56,26 @@ Implemented so far (Phases 0–8 of the [roadmap](docs/17%20-%20Implementation%2
   package and profile file locks with stale-lock recovery, bounded retries,
   crash recovery that never repeats completed actions, failure isolation,
   pause/resume/cancel/skip, event stream, restart recovery
-- Local FastAPI service exposing the full discover → rank → prepare →
-  review → readiness → queue → review-mode execution workflow
+- Submission verification and history (docs/10): the irreversible-action
+  boundary — pre-submission snapshot, submission lock reconciled against
+  attempt records, durable attempt before the click, one-click-only
+  enforcement with no click retry, evidence-graded verification (weak
+  evidence becomes the protected Submission Unknown state), confirmation
+  number extraction, user resolution of unknown outcomes, append-only
+  history events, and idempotent CSV/XLSX synchronization where the CSV is
+  the source of truth and the workbook is always rebuildable
+- Review-mode release (docs/17 Phase 10): user approval bound to exact
+  artifact fingerprints and the reviewed form snapshot, verified again
+  immediately before submission; approved-submission workflow (approval
+  check → fresh refill → final click → verification → history); local
+  backups; audit-trail integrity checks; and a local dashboard at
+  http://localhost:8000/ covering the full workflow
+- Local FastAPI service exposing the complete loop: discover → rank →
+  prepare → review → readiness → queue → review-mode execution →
+  approve → submit → verify → history
 
-Not yet implemented: automated submission and verification (Phase 9+),
-review-mode release hardening (Phase 10+), additional ATS adapters, frontend.
+Not yet implemented: security/ops/UX hardening (Phase 11), limited
+automatic mode (Phase 12), additional ATS adapters (Phase 13).
 
 ## Quick start
 

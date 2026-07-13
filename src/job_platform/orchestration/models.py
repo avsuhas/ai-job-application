@@ -34,6 +34,8 @@ class QueueItemStatus(StrEnum):
     WAITING_FOR_USER = "waiting_for_user"
     WAITING_FOR_REVIEW = "waiting_for_review"
     RETRY_SCHEDULED = "retry_scheduled"
+    SUBMITTED = "submitted"
+    SUBMISSION_UNKNOWN = "submission_unknown"
     ALREADY_APPLIED = "already_applied"
     SKIPPED = "skipped"
     CANCELLED = "cancelled"
@@ -66,10 +68,12 @@ class WorkflowStage(StrEnum):
     QUEUE_VALIDATION = "queue_validation"
     PACKAGE_LOCK = "package_lock"
     PRE_EXECUTION_READINESS = "pre_execution_readiness"
+    USER_APPROVAL_CHECK = "user_approval_check"
     BROWSER_SESSION_START = "browser_session_start"
     APPLICATION_NAVIGATION = "application_navigation"
     APPLICATION_IDENTITY_CHECK = "application_identity_check"
     FORM_EXECUTION = "form_execution"
+    FINAL_SUBMISSION = "final_submission"
     CLEANUP = "cleanup"
 
 
@@ -81,6 +85,7 @@ class StageStatus(StrEnum):
     WAITING_FOR_USER = "waiting_for_user"
     WAITING_FOR_REVIEW = "waiting_for_review"
     CANCELLED = "cancelled"
+    SUBMISSION_UNKNOWN = "submission_unknown"
 
 
 class StageResult(BaseModel):
@@ -102,6 +107,8 @@ class WorkflowStatus(StrEnum):
     WAITING_FOR_USER = "waiting_for_user"
     WAITING_FOR_REVIEW = "waiting_for_review"
     RECOVERING = "recovering"
+    SUBMITTED = "submitted"
+    SUBMISSION_UNKNOWN = "submission_unknown"
     COMPLETED = "completed"
     BLOCKED = "blocked"
     FAILED = "failed"

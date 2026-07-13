@@ -36,13 +36,19 @@ _WORKFLOW_TO_ITEM = {
     WorkflowStatus.COMPLETED: QueueItemStatus.COMPLETED,
     WorkflowStatus.WAITING_FOR_REVIEW: QueueItemStatus.WAITING_FOR_REVIEW,
     WorkflowStatus.WAITING_FOR_USER: QueueItemStatus.WAITING_FOR_USER,
+    WorkflowStatus.SUBMITTED: QueueItemStatus.SUBMITTED,
+    WorkflowStatus.SUBMISSION_UNKNOWN: QueueItemStatus.SUBMISSION_UNKNOWN,
     WorkflowStatus.BLOCKED: QueueItemStatus.BLOCKED,
     WorkflowStatus.FAILED: QueueItemStatus.FAILED,
     WorkflowStatus.CANCELLED: QueueItemStatus.CANCELLED,
 }
 
-# Item states that pause the whole queue (docs/17 Phase 8 MVP policy).
-_PAUSING_ITEM_STATUSES = {QueueItemStatus.WAITING_FOR_USER}
+# Item states that pause the whole queue (docs/17 MVP policy: pause on user
+# action and on Submission Unknown).
+_PAUSING_ITEM_STATUSES = {
+    QueueItemStatus.WAITING_FOR_USER,
+    QueueItemStatus.SUBMISSION_UNKNOWN,
+}
 
 WorkflowRunner = Callable[[str, str], Awaitable[WorkflowState]]
 """(package_id, queue_id) -> final WorkflowState"""

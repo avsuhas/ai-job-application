@@ -18,7 +18,10 @@ from job_platform.api.routes import (
     queue,
     searches,
     system,
+    system_ops,
+    ui,
 )
+from job_platform.review.approval import ApprovalError
 from job_platform.shared.config import Settings, load_settings
 from job_platform.shared.errors import (
     CandidateDataError,
@@ -31,12 +34,15 @@ from job_platform.shared.errors import (
 )
 from job_platform.shared.files import ensure_dir
 from job_platform.shared.logging import configure_logging, get_logger
+from job_platform.submission.service import SubmissionBlockedError
 from job_platform.version import __version__
 
 logger = get_logger("api.app")
 
 _STATUS_BY_ERROR: list[tuple[type[JobPlatformError], int]] = [
     (DuplicateApplicationError, 409),
+    (ApprovalError, 409),
+    (SubmissionBlockedError, 409),
     (StorageError, 404),
     (CandidateDataError, 422),
     (DiscoveryError, 502),
@@ -98,4 +104,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(browser.router)
     app.include_router(ats.router)
     app.include_router(queue.router)
+    app.include_router(system_ops.router)
+    app.include_router(ui.router)
     return app
