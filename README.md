@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–10 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **Review-Mode Beta**:
+Implemented so far (Phases 0–11 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **hardened Review-Mode Beta**:
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -70,12 +70,19 @@ Implemented so far (Phases 0–10 of the [roadmap](docs/17%20-%20Implementation%
   check → fresh refill → final click → verification → history); local
   backups; audit-trail integrity checks; and a local dashboard at
   http://localhost:8000/ covering the full workflow
+- Security, operations, and UX hardening (docs/12, docs/17 Phase 11):
+  secret redaction in logs, prompt-injection detection wired into review and
+  form filling, hard-blocking of government-ID/payment/password fields,
+  localhost-only API with CSRF origin checks and a strict CSP, backup/restore
+  with pre-restore safety copy, migration framework with automatic rollback,
+  low-disk submission guard, hash-chained tamper-evident audit trail,
+  aggregated system health, and a sanitized (secret-free) diagnostic bundle
 - Local FastAPI service exposing the complete loop: discover → rank →
   prepare → review → readiness → queue → review-mode execution →
   approve → submit → verify → history
 
-Not yet implemented: security/ops/UX hardening (Phase 11), limited
-automatic mode (Phase 12), additional ATS adapters (Phase 13).
+Not yet implemented: limited automatic mode (Phase 12), additional ATS
+adapters (Phase 13).
 
 ## Quick start
 

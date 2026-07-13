@@ -47,6 +47,11 @@ def configure_logging(logs_dir: Path | None = None, level: int = logging.INFO) -
         file_handler.setFormatter(JsonLineFormatter())
         root.addHandler(file_handler)
 
+    # Redact secrets from every emitted record (docs/12 Secret Leakage).
+    from job_platform.security.redaction import install_redaction
+
+    install_redaction("job_platform")
+
 
 def get_logger(component: str) -> logging.LoggerAdapter:
     logger = logging.getLogger(f"job_platform.{component}")

@@ -192,3 +192,40 @@ class TestPhase10Endpoints:
         response = client.post(f"/api/applications/{package_id}/approve", json={})
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "approval_error"
+
+
+class TestPhase11Endpoints:
+    def test_system_health_and_disk(self, client):
+        health = client.get("/api/system/health").json()
+        assert "healthy" in health
+        assert any(c["name"] == "audit_trail" for c in health["components"])
+        disk = client.get("/api/system/disk").json()
+        assert disk["free_bytes"] > 0
+
+    def test_diagnostics_bundle_is_sanitized(self, client):
+        body = client.get("/api/system/diagnostics").json()
+        text = client.get("/api/system/diagnostics").text
+        assert "sk-ant-" not in text
+        assert "counts" in body
+        assert "anthropic_api_key_configured" in body
+
+    def test_restore_missing_backup_is_404(self, client):
+        response = client.post(
+            "/api/system/restore", json={"backup_name": "backup_nope.zip"},
+            headers={"origin": "http://localhost"},
+        )
+        assert response.status_code == 404
+
+    def test_backup_then_restore_roundtrip(self, client):
+        name = client.post("/api/system/backup").json()["path"].split("/")[-1]
+        restored = client.post(
+            "/api/system/restore", json={"backup_name": name},
+            headers={"origin": "http://localhost"},
+        )
+        assert restored.status_code == 200
+        assert restored.json()["safety_copy"]
+
+    def test_audit_reports_chain_validity(self, client):
+        client.post("/api/history", json={"company": "A", "job_title": "E", "job_id": "1"})
+        audit = client.get("/api/system/audit").json()
+        assert "chain_valid" in audit

@@ -22,6 +22,8 @@ from job_platform.browser.models import (
 )
 from job_platform.forms.semantic import AUTO_CONFIDENCE, SemanticClassification
 from job_platform.preparation.answers import PreparedAnswerSet
+from job_platform.security.injection import scan_for_injection
+from job_platform.security.sensitive import check_sensitive_field
 
 # Semantic families whose stored answer can satisfy a related question.
 _FAMILY_FALLBACKS = {
@@ -40,6 +42,8 @@ class PlanEntryStatus(StrEnum):
     UNSUPPORTED_WIDGET = "unsupported_widget"
     UNKNOWN_FIELD = "unknown_field"
     SENSITIVE_SKIPPED = "sensitive_skipped"
+    POLICY_BLOCKED = "policy_blocked"
+    INJECTION_SUSPECTED = "injection_suspected"
 
 
 class PlanEntry(BaseModel):
@@ -177,6 +181,25 @@ def build_form_plan(
                     note=note,
                 )
             )
+
+        # Hard policy block: government id / payment / password fields are
+        # never auto-filled, regardless of classification (docs/12).
+        sensitive = check_sensitive_field(
+            field.label, field.section, field.field_type.value
+        )
+        if sensitive.blocked:
+            entry(PlanEntryStatus.POLICY_BLOCKED, sensitive.reason)
+            continue
+
+        # A field label attempting prompt injection is never trusted to fill.
+        injection = scan_for_injection(f"{field.label} {field.help_text}")
+        if injection.detected:
+            entry(
+                PlanEntryStatus.INJECTION_SUSPECTED,
+                "The field text contains suspicious instruction-like content; "
+                "complete this field manually.",
+            )
+            continue
 
         if not classification.usable:
             entry(

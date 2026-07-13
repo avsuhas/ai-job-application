@@ -15,6 +15,7 @@ from job_platform.candidate.models import CandidateBundle
 from job_platform.packages.models import PackageManifest
 from job_platform.packages.store import PackageStore
 from job_platform.review.models import ReviewFinding, ReviewReport, ReviewStatus, Severity
+from job_platform.security.injection import scan_for_injection
 from job_platform.shared.errors import StorageError
 from job_platform.shared.ids import sha256_text
 from job_platform.shared.logging import get_logger
@@ -54,6 +55,7 @@ class ReviewService:
             self._check_resume(manifest, report)
             self._check_cover_letter(manifest, report)
             self._check_answers(manifest, report)
+            self._check_injection(manifest, report)
             report.status = report.derive_status(self._block_on_high_severity)
         except Exception as exc:  # noqa: BLE001 - a broken package must fail review, not crash
             logger.exception("Review failed for package %s", manifest.package_id)
@@ -353,10 +355,10 @@ class ReviewService:
                 report.required_user_actions.append(
                     f"Provide an answer for {question.get('question_family')}"
                 )
-        answers = self._read_json(manifest, "answers/prepared_answers.json") or {}
+        answers_doc = self._read_json(manifest, "answers/prepared_answers.json") or {}
         unapproved = [
             a["question_family"]
-            for a in answers.get("answers", [])
+            for a in answers_doc.get("answers", [])
             if not a.get("approved", False)
         ]
         if unapproved:
@@ -372,3 +374,25 @@ class ReviewService:
                 )
             )
             report.required_user_actions.append("Review and approve narrative answers")
+
+    def _check_injection(self, manifest: PackageManifest, report: ReviewReport) -> None:
+        """Flag prompt-injection phrasing in the (untrusted) job description
+        snapshot so the user is aware before submission (docs/12)."""
+        description = self._read_text(manifest, "job/raw_description.txt")
+        if not description:
+            return
+        scan = scan_for_injection(description)
+        if scan.detected:
+            report.findings.append(
+                ReviewFinding(
+                    category="prompt_injection",
+                    severity=Severity.MEDIUM,
+                    artifact="job/raw_description.txt",
+                    message=(
+                        "The job description contains instruction-like content "
+                        "that may be a prompt-injection attempt. It was treated "
+                        "as untrusted data; review before submitting."
+                    ),
+                    evidence=scan.matches,
+                )
+            )

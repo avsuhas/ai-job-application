@@ -136,6 +136,16 @@ class SubmissionService:
                 "Final submission requires explicit user approval.",
                 details={"package_id": manifest.package_id},
             )
+        # Low disk must not risk a partial write mid-submission (docs/17
+        # Phase 11: low disk blocks unsafe submission).
+        from job_platform.operations.disk import check_disk
+
+        disk = check_disk(self._store.package_dir(manifest.package_id).parent)
+        if not disk.safe_to_write:
+            raise SubmissionBlockedError(
+                f"Submission blocked: {disk.message}",
+                details={"free_bytes": disk.free_bytes},
+            )
         if self.load_unknown_outcome(manifest.package_id) is not None:
             raise SubmissionBlockedError(
                 "A prior attempt ended in Submission Unknown; resolve it before "

@@ -89,7 +89,8 @@ class FormExecutionReport(BaseModel):
     @property
     def fields_needing_user(self) -> list[PlanEntry]:
         wanted = {"unknown_field", "no_stored_answer", "option_mismatch",
-                  "unsupported_widget", "sensitive_skipped"}
+                  "unsupported_widget", "sensitive_skipped", "policy_blocked",
+                  "injection_suspected"}
         return [
             entry
             for page in self.pages

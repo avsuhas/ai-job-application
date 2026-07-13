@@ -39,22 +39,38 @@ _PAGE = """<!doctype html>
   .attn { color: #cc6600; font-size: 0.8rem; }
   #toast { position: fixed; bottom: 1rem; right: 1rem; background: #222;
            color: #fff; padding: 0.6rem 1rem; border-radius: 8px; display: none; }
+  .skip { position: absolute; left: -999px; }
+  .skip:focus { position: static; display: inline-block; margin-bottom: .5rem; }
+  .degraded { color: #cc3300; font-weight: 600; }
+  button:focus-visible { outline: 3px solid #4477dd; outline-offset: 2px; }
 </style>
 </head>
 <body>
+<a href="#applications-section" class="skip">Skip to applications</a>
 <h1>Job Platform <span id="version" class="muted"></span></h1>
+<p id="health" class="muted" role="status" aria-live="polite">Loading…</p>
 <p id="candidate" class="muted">Loading…</p>
 
-<h2>Applications <button class="secondary" onclick="load()">Refresh</button></h2>
+<main>
+<section id="applications-section" aria-labelledby="apps-heading">
+<h2 id="apps-heading">Applications
+  <button class="secondary" onclick="load()" aria-label="Refresh applications">Refresh</button></h2>
 <div id="applications"></div>
+</section>
 
-<h2>Queues</h2>
+<section aria-labelledby="queues-heading">
+<h2 id="queues-heading">Queues</h2>
 <div id="queues"></div>
+</section>
 
-<h2>History <button class="secondary" onclick="exportXlsx()">Export XLSX</button></h2>
+<section aria-labelledby="history-heading">
+<h2 id="history-heading">History
+  <button class="secondary" onclick="exportXlsx()">Export XLSX</button></h2>
 <div id="history"></div>
+</section>
+</main>
 
-<div id="toast"></div>
+<div id="toast" role="alert" aria-live="assertive"></div>
 
 <script>
 const api = (p, opts) => fetch(p, opts).then(async r => {
@@ -75,6 +91,20 @@ async function load() {
   const health = await api('/api/health');
   document.getElementById('version').textContent = 'v' + health.version +
     ' · provider: ' + health.provider;
+
+  const sys = await api('/api/system/health');
+  const el = document.getElementById('health');
+  if (sys.healthy) {
+    el.textContent = 'System healthy — ' +
+      sys.components.map(c => c.name + ': ' + c.state).join(' · ');
+    el.className = 'muted';
+  } else {
+    const bad = sys.components.filter(c => c.state !== 'ok' && c.state !== 'not_applicable');
+    el.textContent = 'Degraded components: ' +
+      bad.map(c => c.name + ' (' + c.detail + ')').join(', ');
+    el.className = 'degraded';
+  }
+
   const cand = await api('/api/candidate/status');
   document.getElementById('candidate').textContent = cand.ok
     ? `Candidate ready — ${cand.resumes.length} resume(s), ${cand.warnings.length} warning(s)`

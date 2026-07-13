@@ -21,6 +21,11 @@ from job_platform.api.routes import (
     system_ops,
     ui,
 )
+from job_platform.api.security_middleware import (
+    CSRFOriginMiddleware,
+    LocalOnlyMiddleware,
+    SecurityHeadersMiddleware,
+)
 from job_platform.review.approval import ApprovalError
 from job_platform.shared.config import Settings, load_settings
 from job_platform.shared.errors import (
@@ -90,6 +95,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Local-first LLM-powered job search and application platform",
         lifespan=lifespan,
     )
+
+    # Security middleware (docs/12): outermost runs last, so add headers first,
+    # then CSRF, then local-only as the outermost guard.
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CSRFOriginMiddleware)
+    app.add_middleware(LocalOnlyMiddleware)
 
     @app.exception_handler(JobPlatformError)
     async def handle_platform_error(request: Request, exc: JobPlatformError) -> JSONResponse:

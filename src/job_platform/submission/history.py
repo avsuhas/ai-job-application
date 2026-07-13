@@ -17,15 +17,18 @@ from openpyxl import Workbook
 from pydantic import BaseModel, Field
 
 from job_platform.shared.errors import DuplicateApplicationError
-from job_platform.shared.ids import new_id
+from job_platform.shared.ids import new_id, sha256_text
 from job_platform.shared.logging import get_logger
 from job_platform.storage.tracker import ApplicationRecord, ApplicationTracker
 
 logger = get_logger("submission.history")
 
+GENESIS_HASH = "0" * 64
+
 
 class HistoryEvent(BaseModel):
-    """docs/10 History Event Model (append-only audit)."""
+    """docs/10 History Event Model, hash-chained for tamper detection
+    (docs/17 Phase 11 audit hash chains)."""
 
     event_id: str = Field(default_factory=lambda: new_id("history"))
     package_id: str = ""
@@ -33,6 +36,15 @@ class HistoryEvent(BaseModel):
     message: str = ""
     data: dict = Field(default_factory=dict)
     at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    prev_hash: str = GENESIS_HASH
+    entry_hash: str = ""
+
+    def compute_hash(self) -> str:
+        payload = "\x1f".join([
+            self.event_id, self.package_id, self.event_type, self.message,
+            self.at.isoformat(), self.prev_hash,
+        ])
+        return sha256_text(payload)
 
 
 class ApplicationHistoryService:
@@ -48,6 +60,17 @@ class ApplicationHistoryService:
 
     # -- append-only events -------------------------------------------------- #
 
+    def _last_hash(self) -> str:
+        if not self._events_path.exists():
+            return GENESIS_HASH
+        lines = self._events_path.read_text(encoding="utf-8").splitlines()
+        if not lines:
+            return GENESIS_HASH
+        try:
+            return HistoryEvent.model_validate_json(lines[-1]).entry_hash or GENESIS_HASH
+        except ValueError:
+            return GENESIS_HASH
+
     def record_event(self, event_type: str, package_id: str = "",
                      message: str = "", data: dict | None = None) -> HistoryEvent:
         event = HistoryEvent(
@@ -55,7 +78,9 @@ class ApplicationHistoryService:
             event_type=event_type,
             message=message,
             data=data or {},
+            prev_hash=self._last_hash(),
         )
+        event.entry_hash = event.compute_hash()
         self._events_path.parent.mkdir(parents=True, exist_ok=True)
         with self._events_path.open("a", encoding="utf-8") as handle:
             handle.write(event.model_dump_json() + "\n")

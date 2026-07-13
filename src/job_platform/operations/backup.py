@@ -33,7 +33,9 @@ def create_backup(settings: Settings) -> BackupResult:
     data_root = settings.paths.data_root
     backups_dir = data_root / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    # Microsecond precision so rapid successive backups (e.g. the safety copy
+    # taken during a restore) never collide with the archive being restored.
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
     target = backups_dir / f"backup_{stamp}.zip"
 
     file_count = 0
@@ -76,3 +78,57 @@ def verify_backup(path: Path) -> bool:
             return archive.testzip() is None
     except (OSError, zipfile.BadZipFile):
         return False
+
+
+class RestoreResult(BaseModel):
+    restored_from: str
+    file_count: int
+    safety_copy: str | None = None
+
+
+def restore_backup(settings: Settings, backup_name: str) -> RestoreResult:
+    """Restore a backup over the data root (docs/17 Phase 11 restore).
+
+    A pre-restore safety copy of the current data is taken first so a restore
+    is itself recoverable. Paths inside the archive are validated to prevent
+    traversal outside the data root.
+    """
+    from job_platform.shared.errors import StorageError
+
+    data_root = settings.paths.data_root.resolve()
+    backup_path = data_root / "backups" / Path(backup_name).name
+    if not backup_path.exists():
+        raise StorageError(
+            f"Backup '{backup_name}' was not found.", details={"backup": backup_name}
+        )
+    if not verify_backup(backup_path):
+        raise StorageError(
+            f"Backup '{backup_name}' is corrupt and cannot be restored.",
+            details={"backup": backup_name},
+        )
+
+    safety = create_backup(settings)  # snapshot current state before overwriting
+
+    file_count = 0
+    with zipfile.ZipFile(backup_path) as archive:
+        for member in archive.namelist():
+            target = (data_root / member).resolve()
+            if not target.is_relative_to(data_root):
+                raise StorageError(
+                    "Backup contains a path that escapes the data root; "
+                    "refusing to restore.",
+                    details={"member": member},
+                )
+            if member.endswith("/"):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target.open("wb") as out:
+                out.write(source.read())
+            file_count += 1
+
+    logger.info("Restored %d file(s) from %s", file_count, backup_name)
+    return RestoreResult(
+        restored_from=backup_name,
+        file_count=file_count,
+        safety_copy=Path(safety.path).name,
+    )
