@@ -1,10 +1,13 @@
-"""Greenhouse ATS adapter (docs/09 Greenhouse Adapter Considerations).
+"""Lever ATS adapter (docs/09 Lever Adapter Considerations).
 
-Status: beta — review mode only; automatic submission remains unavailable.
-Handles hosted job-board forms (single page with sections), the standard
-Greenhouse field ids, resume/cover-letter uploads, employer custom questions
-(deferred to generic classification), demographic sections, and confirmation
-pages. Falls back to the Generic Form Engine for anything unrecognized.
+Status: beta — review mode only. Handles Lever's compact hosted application
+forms: a single ``name`` field, email/phone, current company (``org``),
+resume upload, profile links (``urls[...]``), employer custom cards (deferred
+to generic classification), and confirmation pages.
+
+Per the Phase 13 Expansion Rule this adapter carries its own detection,
+mapping, and confirmation logic and passes its own independent test gate — it
+does not inherit trust from the Greenhouse adapter.
 """
 
 from __future__ import annotations
@@ -27,54 +30,57 @@ from job_platform.browser.models import FormAction, FormField, PageSnapshot
 from job_platform.forms.engine import is_review_page
 from job_platform.forms.semantic import SemanticClassification
 
-_DOMAINS = ("greenhouse.io",)
+_DOMAINS = ("lever.co",)
 
-# Standard Greenhouse application field ids → canonical families. Exact id
-# matches earn near-certain confidence (docs/09 exact known label mapping).
+# Lever's stable form field names → canonical families. Lever uses a single
+# full-name field and bracketed link fields.
 _KNOWN_FIELD_IDS = {
-    "first_name": "personal.first_name",
-    "last_name": "personal.last_name",
+    "name": "personal.full_name",
     "email": "personal.email",
     "phone": "personal.phone",
+    "org": "employment.current_company",
     "resume": "documents.resume",
-    "cover_letter": "documents.cover_letter",
-    "job_application_location": "personal.city",
-    "candidate-location": "personal.city",
-    "gender": "demographic.gender",
-    "hispanic_ethnicity": "demographic.race_ethnicity",
-    "race": "demographic.race_ethnicity",
-    "veteran_status": "demographic.veteran_status",
-    "disability_status": "demographic.disability_status",
+    "urls[LinkedIn]": "links.linkedin",
+    "urls[GitHub]": "links.github",
+    "urls[Portfolio]": "links.portfolio",
+    "urls[Other]": "links.website",
 }
 
-_TITLE_PATTERN = re.compile(
-    r"job application for (?P<title>.+?) at (?P<company>.+)", re.IGNORECASE
-)
+# "AcmeCorp - Backend Engineer" (Lever posting/application page title).
+_TITLE_PATTERN = re.compile(r"(?P<company>.+?)\s+[-–]\s+(?P<title>.+)")
+# jobs.lever.co/{org}/{uuid}
+_POSTING_URL = re.compile(r"lever\.co/(?P<org>[^/]+)/(?P<uuid>[0-9a-f-]{16,})", re.IGNORECASE)
 
 _CONFIRMATION_MARKERS = (
     "thank you for applying",
-    "application has been submitted",
     "application submitted",
-    "application has been received",
+    "your application has been submitted",
+    "we've received your application",
     "we have received your application",
+    "application received",
 )
 
-_CLOSED_MARKERS = ("job is no longer open", "position has been filled", "job closed")
+_CLOSED_MARKERS = ("no longer accepting applications", "position is closed", "job closed")
 
 _SUBMIT_LABELS = ("submit application", "submit your application")
+_SUBMIT_IDS = ("btn-submit", "submit-btn", "template-btn-submit")
 
 
 def _host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
-class GreenhouseAdapter(ATSAdapter):
+def _titleize(org: str) -> str:
+    return re.sub(r"[-_]+", " ", org).strip().title()
+
+
+class LeverAdapter(ATSAdapter):
     _metadata = AdapterMetadata(
-        adapter_id="greenhouse",
-        display_name="Greenhouse",
+        adapter_id="lever",
+        display_name="Lever",
         adapter_version="1.0.0",
         status=AdapterStatus.BETA,
-        supported_domains=["boards.greenhouse.io", "job-boards.greenhouse.io"],
+        supported_domains=["jobs.lever.co", "jobs.eu.lever.co"],
         capabilities={
             "form_completion": CapabilityLevel.SUPPORTED,
             "resume_upload": CapabilityLevel.SUPPORTED,
@@ -89,7 +95,7 @@ class GreenhouseAdapter(ATSAdapter):
     def metadata(self) -> AdapterMetadata:
         return self._metadata
 
-    # -- detection (docs/09 Detection Signals) --------------------------- #
+    # -- detection --------------------------------------------------------- #
 
     def detect(self, url: str, snapshot: PageSnapshot | None = None) -> ATSDetectionResult:
         methods: list[str] = []
@@ -102,38 +108,40 @@ class GreenhouseAdapter(ATSAdapter):
 
         if snapshot is not None:
             frames = " ".join(snapshot.frames).lower()
-            if "greenhouse.io" in frames:
+            if "lever.co" in frames:
                 methods.append("embedded_iframe")
                 confidence = max(confidence, 85)
 
             field_ids = {f.field_id for f in snapshot.fields}
-            known_hits = len(field_ids & {"first_name", "last_name", "email", "phone"})
-            title = snapshot.title.lower()
-            if known_hits >= 3 and _TITLE_PATTERN.search(title):
+            # Lever's signature: a single full-name field plus email + resume,
+            # which the Greenhouse signature (first_name/last_name) never matches.
+            has_lever_fields = "name" in field_ids and "email" in field_ids
+            control = self.identify_submission_control(snapshot)
+            if has_lever_fields and (
+                "resume" in field_ids or any("urls[" in f for f in field_ids)
+            ):
                 methods.append("page_signature")
                 confidence = max(confidence, 90)
-            elif known_hits >= 3 and "application" in title:
+            elif has_lever_fields and control is not None:
                 methods.append("field_id_signature")
                 confidence = max(confidence, 65)
 
         return ATSDetectionResult(
-            detected_ats="greenhouse" if confidence else "",
+            detected_ats="lever" if confidence else "",
             confidence=confidence,
             detection_methods=methods,
-            matched_adapter="greenhouse" if confidence else None,
+            matched_adapter="lever" if confidence else None,
             generic_fallback_allowed=True,
         )
 
-    # -- page classification ---------------------------------------------- #
+    # -- page classification ----------------------------------------------- #
 
     def classify_page(self, snapshot: PageSnapshot) -> PageClassification:
         text = f"{snapshot.heading} {snapshot.title}".lower()
         if any(marker in text for marker in _CONFIRMATION_MARKERS):
             return PageClassification(page_type=PageType.CONFIRMATION, confidence=95)
         if any(marker in text for marker in _CLOSED_MARKERS):
-            return PageClassification(
-                page_type=PageType.APPLICATION_CLOSED, confidence=90
-            )
+            return PageClassification(page_type=PageType.APPLICATION_CLOSED, confidence=90)
         if snapshot.signals.captcha:
             return PageClassification(page_type=PageType.CAPTCHA, confidence=95)
         if snapshot.signals.login:
@@ -142,7 +150,7 @@ class GreenhouseAdapter(ATSAdapter):
             return PageClassification(page_type=PageType.REVIEW, confidence=85)
 
         field_ids = {f.field_id for f in snapshot.fields if f.visible}
-        if {"first_name", "last_name", "email"} <= field_ids:
+        if {"name", "email"} <= field_ids:
             return PageClassification(
                 page_type=PageType.APPLICATION_FORM,
                 confidence=90,
@@ -152,31 +160,37 @@ class GreenhouseAdapter(ATSAdapter):
             return PageClassification(page_type=PageType.JOB_DETAIL, confidence=70)
         return PageClassification(page_type=PageType.UNKNOWN, confidence=30)
 
-    # -- job identity (docs/09 Application Identity Preservation) --------- #
+    # -- job identity ------------------------------------------------------- #
 
     def extract_job_identity(self, snapshot: PageSnapshot) -> JobIdentity:
-        match = _TITLE_PATTERN.search(snapshot.title)
-        if match:
-            job_id = ""
-            url_match = re.search(r"/jobs/(\d+)", snapshot.url)
-            if url_match:
-                job_id = url_match.group(1)
+        url_match = _POSTING_URL.search(snapshot.url)
+        job_id = url_match.group("uuid") if url_match else ""
+        company_from_url = _titleize(url_match.group("org")) if url_match else ""
+
+        title_match = _TITLE_PATTERN.search(snapshot.title)
+        if title_match:
             return JobIdentity(
-                company=match.group("company").strip(),
-                title=match.group("title").strip(),
+                company=company_from_url or title_match.group("company").strip(),
+                title=title_match.group("title").strip(),
                 job_id=job_id,
-                confidence=90,
+                confidence=90 if company_from_url else 80,
             )
         if snapshot.heading:
-            return JobIdentity(title=snapshot.heading.strip(), confidence=40)
-        return JobIdentity()
+            return JobIdentity(
+                company=company_from_url,
+                title=snapshot.heading.strip(),
+                job_id=job_id,
+                confidence=55 if company_from_url else 40,
+            )
+        return JobIdentity(company=company_from_url, job_id=job_id,
+                           confidence=30 if company_from_url else 0)
 
     # -- field semantics ---------------------------------------------------- #
 
     def classify_field(self, field: FormField) -> SemanticClassification | None:
         family = _KNOWN_FIELD_IDS.get(field.field_id)
         if family is None:
-            return None  # employer custom questions defer to generic rules
+            return None  # employer custom cards defer to generic rules
         return SemanticClassification(
             field_id=field.field_id,
             semantic_type=family,
@@ -184,13 +198,12 @@ class GreenhouseAdapter(ATSAdapter):
             method="ats_known_field_id",
         )
 
-    # -- submission and confirmation --------------------------------------- #
+    # -- submission and confirmation ---------------------------------------- #
 
     def identify_submission_control(self, snapshot: PageSnapshot) -> FormAction | None:
         for action in snapshot.actions:
-            lowered = action.label.lower()
-            if action.action_id == "submit_app" or any(
-                marker in lowered for marker in _SUBMIT_LABELS
+            if action.action_id in _SUBMIT_IDS or any(
+                marker in action.label.lower() for marker in _SUBMIT_LABELS
             ):
                 return action
         return next((a for a in snapshot.actions if a.type == "submit"), None)
@@ -207,16 +220,5 @@ class GreenhouseAdapter(ATSAdapter):
         return ConfirmationResult(
             confirmed=False,
             method="confirmation_text",
-            evidence=["No Greenhouse confirmation markers found on the page."],
+            evidence=["No Lever confirmation markers found on the page."],
         )
-
-
-def default_registry():
-    """Registry with all built-in adapters registered."""
-    from job_platform.ats.lever import LeverAdapter
-    from job_platform.ats.registry import ATSAdapterRegistry
-
-    registry = ATSAdapterRegistry()
-    registry.register(GreenhouseAdapter())
-    registry.register(LeverAdapter())
-    return registry

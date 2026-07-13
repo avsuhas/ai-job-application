@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–12 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **Limited Automatic Beta**:
+Implemented so far — **all 13 roadmap phases** ([roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)); Limited Automatic Beta plus ATS expansion:
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -44,11 +44,13 @@ Implemented so far (Phases 0–12 of the [roadmap](docs/17%20-%20Implementation%
   confidence gating (high=auto, medium=review, low=user), dynamic
   conditional-field rounds, review-page detection, and ambiguous-final-action
   protection — the engine never clicks submit
-- Greenhouse ATS adapter (docs/09, beta): multi-signal detection (domain,
-  embedded iframe, page signature), page classification, job-identity
+- Greenhouse and Lever ATS adapters (docs/09, beta): multi-signal detection
+  (domain, embedded iframe, page signature), page classification, job-identity
   extraction, exact field-id semantics, submission-control identification
-  (never clicked), simulated confirmation verification, registry with
-  priority resolution and safe generic fallback
+  (never clicked), simulated confirmation verification, registry with priority
+  resolution and safe generic fallback; each adapter passes its own
+  independent test gate and cross-adapter isolation checks (Phase 13
+  Expansion Rule)
 - Queue and execution orchestration (docs/08): admission control with
   rejection reasons, sequential queue over one browser profile, durable
   workflow state machine (validation → lock → readiness → browser →
@@ -85,12 +87,20 @@ Implemented so far (Phases 0–12 of the [roadmap](docs/17%20-%20Implementation%
   everything, automatic downgrade to review whenever any precondition fails
   or an unknown/sensitive/injection field appears, per-outcome audit metrics,
   and an [incident runbook](docs/RUNBOOK_automatic_mode.md)
+- ATS expansion and analytics (docs/17 Phase 13): a second dedicated adapter
+  (Lever) added under the Expansion Rule — its own detection, mapping,
+  submission-control, and confirmation logic with an independent test gate,
+  cross-adapter isolation checks, and live non-submission validation, so it
+  inherits no trust from Greenhouse; plus application analytics (totals, by
+  status/company/date, and a discover→submit funnel) surfaced on the dashboard
 - Local FastAPI service exposing the complete loop: discover → rank →
   prepare → review → readiness → queue (review or automatic) → execution →
   approve/eligibility → submit → verify → history
 
-Not yet implemented: ATS expansion — Workday/SmartRecruiters/iCIMS adapters,
-multiple browser profiles, richer analytics (Phase 13).
+All 13 roadmap phases are implemented. Future ATS coverage (Workday,
+SmartRecruiters, iCIMS) follows the same Expansion Rule: every new adapter
+must independently pass its full detection/form/review/submission/recovery/
+security/privacy test gate.
 
 ## Quick start
 

@@ -63,6 +63,11 @@ _PAGE = """<!doctype html>
 <div id="queues"></div>
 </section>
 
+<section aria-labelledby="analytics-heading">
+<h2 id="analytics-heading">Analytics</h2>
+<div id="analytics"></div>
+</section>
+
 <section aria-labelledby="history-heading">
 <h2 id="history-heading">History
   <button class="secondary" onclick="exportXlsx()">Export XLSX</button></h2>
@@ -120,10 +125,27 @@ async function load() {
     ? queues.queues.map(queueCard).join('')
     : '<p class="muted">No queues yet.</p>';
 
+  const stats = await api('/api/history/analytics');
+  document.getElementById('analytics').innerHTML = analyticsView(stats);
+
   const hist = await api('/api/history');
   document.getElementById('history').innerHTML = hist.applications.length
     ? historyTable(hist.applications)
     : '<p class="muted">No submitted applications yet.</p>';
+}
+
+function analyticsView(s) {
+  if (!s.total_applications) return '<p class="muted">No applications recorded yet.</p>';
+  const status = Object.entries(s.by_status)
+    .map(([k, v]) => `${k}: ${v}`).join(' · ');
+  const top = s.top_companies.map(c => `${c.company} (${c.count})`).join(', ');
+  const funnel = Object.entries(s.funnel)
+    .map(([k, v]) => `${k}: ${v}`).join(' · ');
+  return `<div class="card">
+    <div><strong>${s.total_applications}</strong> application(s) recorded</div>
+    <div class="muted">By status — ${status || 'none'}</div>
+    <div class="muted">Top companies — ${top || 'none'}</div>
+    <div class="muted">Funnel — ${funnel || 'none'}</div></div>`;
 }
 
 function appCard(a) {

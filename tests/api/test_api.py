@@ -274,3 +274,21 @@ class TestAutomaticModeAPI:
         metrics = client.get("/api/automatic-mode/metrics").json()
         assert metrics["auto_submitted"] == 0
         assert metrics["downgraded_to_review"] == 0
+
+
+class TestAnalyticsAPI:
+    def test_analytics_endpoint(self, client):
+        for job_id in ("1", "2"):
+            client.post("/api/history", json={
+                "company": "Acme", "job_title": f"Role {job_id}", "job_id": job_id,
+                "status": "submitted",
+            })
+        stats = client.get("/api/history/analytics").json()
+        assert stats["total_applications"] == 2
+        assert stats["by_status"]["submitted"] == 2
+        assert stats["top_companies"][0]["company"] == "Acme"
+
+    def test_ats_listing_includes_lever(self, client):
+        body = client.get("/api/ats/adapters").json()
+        ids = {a["adapter_id"] for a in body}
+        assert ids == {"greenhouse", "lever"}

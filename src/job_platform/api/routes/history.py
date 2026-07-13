@@ -43,3 +43,11 @@ def history_events(
 ) -> dict:
     events = state.history_service().events(package_id=package_id)
     return {"count": len(events), "events": [e.model_dump(mode="json") for e in events]}
+
+
+@router.get("/api/history/analytics")
+def history_analytics(state: AppState = Depends(get_state)) -> dict:
+    from job_platform.storage.analytics import compute_analytics
+
+    events = state.history_service().events(limit=100000)
+    return compute_analytics(state.tracker, events).model_dump(mode="json")
