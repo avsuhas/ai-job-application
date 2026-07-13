@@ -123,8 +123,9 @@ class QueueManager:
         package_ids: list[str],
         bundle: CandidateBundle,
         ordering: str = "selected_order",
+        mode: str = "review",
     ) -> QueueModel:
-        queue = QueueModel(ordering=ordering)
+        queue = QueueModel(ordering=ordering, mode=mode)
         for package_id in package_ids:
             item = QueueItem(package_id=package_id)
             try:

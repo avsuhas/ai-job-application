@@ -13,6 +13,8 @@ from job_platform.candidate.models import CandidateBundle
 from job_platform.jobs.service import DiscoveryService
 from job_platform.jobs.sources import CompanySource, load_company_sources
 from job_platform.orchestration.admission import QueueAdmissionController
+from job_platform.orchestration.automatic import KillSwitch
+from job_platform.orchestration.eligibility import AutomaticEligibility
 from job_platform.orchestration.locks import LockManager
 from job_platform.orchestration.models import WorkflowState
 from job_platform.orchestration.queue import QueueManager
@@ -94,10 +96,26 @@ class AppState:
     def submission_service(self) -> SubmissionService:
         return SubmissionService(self.package_store, self.tracker, self.history_service())
 
+    def kill_switch(self) -> KillSwitch:
+        return KillSwitch(self.settings.paths.data_root)
+
+    def eligibility_engine(self) -> AutomaticEligibility:
+        return AutomaticEligibility(
+            self.settings.automatic_mode,
+            self.package_store,
+            self.tracker,
+            self.kill_switch(),
+        )
+
     async def _run_workflow(
-        self, package_id: str, queue_id: str, submit: bool = False
+        self,
+        package_id: str,
+        queue_id: str,
+        submit: bool = False,
+        automatic: bool = False,
     ) -> WorkflowState:
         manifest = self.package_store.load_manifest(package_id)
+        needs_submission = submit or automatic
         workflow = ApplicationWorkflow(
             manifest=manifest,
             bundle=self.candidate_bundle(),
@@ -109,9 +127,17 @@ class AppState:
             settings=self.settings,
             queue_id=queue_id,
             submit_mode=submit,
-            submission_service=self.submission_service() if submit else None,
+            automatic_mode=automatic,
+            submission_service=self.submission_service() if needs_submission else None,
+            eligibility=self.eligibility_engine() if automatic else None,
+            history=self.history_service() if automatic else None,
         )
         return await workflow.run()
+
+    async def _run_automatic_workflow(
+        self, package_id: str, queue_id: str
+    ) -> WorkflowState:
+        return await self._run_workflow(package_id, queue_id, automatic=True)
 
     async def run_submission_workflow(self, package_id: str) -> WorkflowState:
         """Run the approved-submission workflow for one package, holding the
@@ -123,19 +149,25 @@ class AppState:
         finally:
             profile_lock.release()
 
-    def queue_manager(self) -> QueueManager:
-        if not hasattr(self, "_queue_manager"):
+    def queue_manager(self, automatic: bool = False) -> QueueManager:
+        attr = "_auto_queue_manager" if automatic else "_queue_manager"
+        if not hasattr(self, attr):
             locks = self.lock_manager()
-            self._queue_manager = QueueManager(
-                queues_dir=self.settings.paths.queues_dir,
-                package_store=self.package_store,
-                admission=QueueAdmissionController(
-                    self.package_store, self.readiness_service(), locks
+            runner = self._run_automatic_workflow if automatic else self._run_workflow
+            setattr(
+                self,
+                attr,
+                QueueManager(
+                    queues_dir=self.settings.paths.queues_dir,
+                    package_store=self.package_store,
+                    admission=QueueAdmissionController(
+                        self.package_store, self.readiness_service(), locks
+                    ),
+                    locks=locks,
+                    workflow_runner=runner,
                 ),
-                locks=locks,
-                workflow_runner=self._run_workflow,
             )
-        return self._queue_manager
+        return getattr(self, attr)
 
 
 def get_state(request: Request) -> AppState:

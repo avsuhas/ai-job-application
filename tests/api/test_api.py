@@ -229,3 +229,48 @@ class TestPhase11Endpoints:
         client.post("/api/history", json={"company": "A", "job_title": "E", "job_id": "1"})
         audit = client.get("/api/system/audit").json()
         assert "chain_valid" in audit
+
+
+class TestAutomaticModeAPI:
+    def test_disabled_by_default(self, client):
+        body = client.get("/api/automatic-mode").json()
+        assert body["settings"]["enabled"] is False
+        assert body["effective_enabled"] is False
+
+    def test_enable_and_kill_switch(self, client):
+        client.put("/api/automatic-mode",
+                   json={"enabled": True, "adapter_allowlist": ["greenhouse"]})
+        body = client.get("/api/automatic-mode").json()
+        assert body["settings"]["enabled"] is True
+        assert body["effective_enabled"] is True
+
+        client.post("/api/automatic-mode/kill", json={"reason": "test incident"})
+        body = client.get("/api/automatic-mode").json()
+        assert body["kill_switch_engaged"] is True
+        assert body["effective_enabled"] is False  # kill switch overrides enabled
+
+        client.post("/api/automatic-mode/release")
+        assert client.get("/api/automatic-mode").json()["kill_switch_engaged"] is False
+
+    def test_automatic_queue_rejected_when_disabled(self, client, greenhouse_payload):
+        import httpx as _httpx
+        import respx as _respx
+        with _respx.mock:
+            _respx.get(GREENHOUSE_URL).mock(
+                return_value=_httpx.Response(200, json=greenhouse_payload)
+            )
+            search_id = client.post("/api/searches?wait=true", json={}).json()["search_id"]
+        job_id = client.get(f"/api/searches/{search_id}/jobs").json()["jobs"][0]["job"]["id"]
+        package_id = client.post(
+            "/api/applications/prepare", json={"search_id": search_id, "job_id": job_id}
+        ).json()["package_id"]
+        response = client.post(
+            "/api/queue", json={"package_ids": [package_id], "mode": "automatic"}
+        )
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "configuration_error"
+
+    def test_metrics_endpoint(self, client):
+        metrics = client.get("/api/automatic-mode/metrics").json()
+        assert metrics["auto_submitted"] == 0
+        assert metrics["downgraded_to_review"] == 0

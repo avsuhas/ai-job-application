@@ -78,6 +78,9 @@ class ApplicationWorkflow:
         headless: bool | None = None,
         submit_mode: bool = False,
         submission_service=None,
+        automatic_mode: bool = False,
+        eligibility=None,
+        history=None,
     ) -> None:
         self._manifest = manifest
         self._bundle = bundle
@@ -89,10 +92,17 @@ class ApplicationWorkflow:
         self._settings = settings
         self._queue_id = queue_id
         self._headless = headless
-        self._submit_mode = submit_mode
+        # Automatic mode is a submit mode gated by the eligibility engine
+        # instead of a user approval record.
+        self._automatic_mode = automatic_mode
+        self._submit_mode = submit_mode or automatic_mode
         self._submission_service = submission_service
-        if submit_mode and submission_service is None:
-            raise ValueError("submit_mode requires a submission_service")
+        self._eligibility = eligibility
+        self._history = history
+        if self._submit_mode and submission_service is None:
+            raise ValueError("submit/automatic mode requires a submission_service")
+        if automatic_mode and eligibility is None:
+            raise ValueError("automatic_mode requires an eligibility engine")
         self._session: BrowserSession | None = None
         self._package_lock = None
         self._snapshot = None
@@ -151,7 +161,12 @@ class ApplicationWorkflow:
             (WorkflowStage.PACKAGE_LOCK, self._stage_lock, 1),
             (WorkflowStage.PRE_EXECUTION_READINESS, self._stage_readiness, 1),
         ]
-        if self._submit_mode:
+        if self._automatic_mode:
+            # Cheap pre-browser gate (enabled + kill switch) before launching.
+            stages.append(
+                (WorkflowStage.USER_APPROVAL_CHECK, self._stage_automatic_precheck, 1)
+            )
+        elif self._submit_mode:
             # Approval is verified before any browser work (docs/17 Phase 10:
             # approval bound to the reviewed snapshot).
             stages.append(
@@ -335,6 +350,66 @@ class ApplicationWorkflow:
             f"Approved by {approval.approved_by} at {approval.approved_at.isoformat()}"
         )
 
+    async def _stage_automatic_precheck(
+        self, state: WorkflowState, result: StageResult
+    ) -> None:
+        """Cheap pre-browser gate for automatic mode. A blocked gate downgrades
+        the run to review (fill only, no submit) rather than failing."""
+        gate = self._eligibility.quick_gate(self._manifest)
+        if not gate.automatic:
+            self._downgrade("; ".join(gate.reasons))
+            result.status = StageStatus.NON_RETRYABLE_FAILURE
+            result.error = "Automatic mode unavailable: " + "; ".join(gate.reasons)
+
+    def _final_control_confidence(self) -> int:
+        """Confidence that the identified control is the true final submission
+        control (docs/17: final control confidence must exceed threshold)."""
+        if self._adapter is None:
+            return 0
+        control = self._adapter.identify_submission_control(self._snapshot)
+        if control is None:
+            return 0
+        # Adapter-identified by exact id/label is high confidence; a generic
+        # type=="submit" match is lower.
+        return 95 if control.type == "submit" and control.action_id else 80
+
+    def _downgrade(self, reason: str) -> None:
+        if self._history is not None:
+            self._history.record_event(
+                "auto_downgraded", package_id=self._manifest.package_id, message=reason
+            )
+
+    def _review_status(self):
+        from job_platform.review.models import ReviewStatus
+
+        report = self._read_package_json("review/review_report.json")
+        return ReviewStatus(report["status"]) if report else ReviewStatus.BLOCKED
+
+    def _review_warning_count(self) -> int:
+        report = self._read_package_json("review/review_report.json")
+        if not report:
+            return 999
+        return sum(
+            1 for f in report.get("findings", [])
+            if f.get("severity") in ("high", "medium", "low")
+        )
+
+    def _readiness_status(self):
+        from job_platform.readiness.models import ReadinessStatus
+
+        report = self._read_package_json("readiness/readiness_report.json")
+        return ReadinessStatus(report["status"]) if report else ReadinessStatus.NOT_READY
+
+    def _read_package_json(self, relative_path: str) -> dict | None:
+        from job_platform.shared.errors import StorageError
+
+        try:
+            return json.loads(
+                self._store.read_artifact(self._manifest.package_id, relative_path)
+            )
+        except (StorageError, ValueError):
+            return None
+
     async def _stage_form_execution(self, state: WorkflowState, result: StageResult) -> None:
         answers = load_prepared_answers(self._store, self._manifest)
         documents = documents_for_package(self._manifest, self._store, self._bundle)
@@ -358,16 +433,43 @@ class ApplicationWorkflow:
             state_file=state_file,
         )
         report = await engine.run_review_mode(self._snapshot)
-        if not self._submit_mode:
+        # Automatic mode always keeps the report so a downgrade leaves a
+        # reviewable filled form behind.
+        if not self._submit_mode or self._automatic_mode:
             store_execution_report(self._store, self._manifest, report)
         state.engine_status = report.status.value
 
         workflow_status = _ENGINE_TO_WORKFLOW.get(report.status, WorkflowStatus.FAILED)
         if workflow_status == WorkflowStatus.WAITING_FOR_REVIEW:
             if self._submit_mode:
-                # The form is filled and stopped at the final control —
-                # exactly the state the submission stage needs.
                 self._snapshot = await self._session.inspect_page()
+                if self._automatic_mode:
+                    # Full eligibility gate with the now-known adapter, control
+                    # confidence, and form-fill signals (docs/17 downgrade
+                    # conditions). Any surfaced field or failed gate downgrades.
+                    if report.fields_needing_user:
+                        self._downgrade(
+                            "Fields require the user: "
+                            + ", ".join(
+                                e.field_id for e in report.fields_needing_user[:5]
+                            )
+                        )
+                        result.status = StageStatus.WAITING_FOR_REVIEW
+                        return
+                    verdict = self._eligibility.evaluate(
+                        self._manifest,
+                        self._bundle,
+                        self._adapter,
+                        self._review_status(),
+                        self._review_warning_count(),
+                        self._readiness_status(),
+                        self._final_control_confidence(),
+                    )
+                    if not verdict.automatic:
+                        self._downgrade("; ".join(verdict.reasons))
+                        result.status = StageStatus.WAITING_FOR_REVIEW
+                        return
+                # Submit (approved submit mode, or automatic mode that passed).
                 return
             result.status = StageStatus.WAITING_FOR_REVIEW
         elif workflow_status == WorkflowStatus.WAITING_FOR_USER:
@@ -406,6 +508,16 @@ class ApplicationWorkflow:
         outcome = verification.outcome if verification else SubmissionOutcome.SUBMISSION_UNKNOWN
         self._submission_outcome = outcome.value
         state.engine_status = f"submission_{outcome.value}"
+        if self._automatic_mode and self._history is not None:
+            event = {
+                SubmissionOutcome.SUBMITTED: "auto_submitted",
+                SubmissionOutcome.SUBMISSION_UNKNOWN: "auto_unknown",
+            }.get(outcome, "auto_blocked")
+            self._history.record_event(
+                event,
+                package_id=self._manifest.package_id,
+                message=f"{self._manifest.job.company} — {self._manifest.job.title}",
+            )
         if outcome == SubmissionOutcome.SUBMITTED:
             return
         if outcome == SubmissionOutcome.SUBMISSION_UNKNOWN:

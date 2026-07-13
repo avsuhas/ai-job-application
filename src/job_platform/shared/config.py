@@ -50,6 +50,22 @@ class JobSearchSettings(BaseModel):
     hide_already_applied: bool = True
 
 
+class AutomaticModeSettings(BaseModel):
+    """Automatic submission policy (docs/17 Phase 12).
+
+    Disabled by default and gated behind an explicit opt-in plus adapter and
+    company allowlists — automatic mode must never be enabled accidentally.
+    """
+
+    enabled: bool = False
+    adapter_allowlist: list[str] = Field(default_factory=list)
+    company_allowlist: list[str] = Field(default_factory=list)
+    daily_limit: int = 10
+    per_company_daily_limit: int = 3
+    max_warnings: int = 0  # any review warning downgrades to review mode
+    final_control_min_confidence: int = 90
+
+
 class StorageSettings(BaseModel):
     tracker_format: Literal["csv"] = "csv"
 
@@ -151,6 +167,7 @@ class Settings(BaseSettings):
     applications: ApplicationSettings = Field(default_factory=ApplicationSettings)
     job_search: JobSearchSettings = Field(default_factory=JobSearchSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    automatic_mode: AutomaticModeSettings = Field(default_factory=AutomaticModeSettings)
     paths: PathSettings = Field(default_factory=PathSettings)
 
     config_dir: Path = Path("config")

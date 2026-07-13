@@ -174,6 +174,7 @@ class QueueModel(BaseModel):
     queue_id: str = Field(default_factory=lambda: new_id("queue"))
     status: QueueStatus = QueueStatus.CREATED
     ordering: str = "selected_order"
+    mode: str = "review"  # review | automatic
     items: list[QueueItem] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)

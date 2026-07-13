@@ -8,7 +8,7 @@ Full specifications live in [docs/](docs/).
 
 ## Status
 
-Implemented so far (Phases 0–11 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **hardened Review-Mode Beta**:
+Implemented so far (Phases 0–12 of the [roadmap](docs/17%20-%20Implementation%20Roadmap,%20Milestones,%20and%20Delivery_plan.md)) — **Limited Automatic Beta**:
 
 - Project foundation: configuration, structured logging, atomic file storage
 - Candidate Knowledge Base loading, validation, and provider context building
@@ -77,12 +77,20 @@ Implemented so far (Phases 0–11 of the [roadmap](docs/17%20-%20Implementation%
   with pre-restore safety copy, migration framework with automatic rollback,
   low-disk submission guard, hash-chained tamper-evident audit trail,
   aggregated system health, and a sanitized (secret-free) diagnostic bundle
+- Limited automatic submission (docs/17 Phase 12): a deterministic
+  eligibility policy engine gating every precondition (Stable + allowlisted
+  adapter, clean review within warning policy, ready, not stale, no
+  duplicate, final-control confidence, daily/company limits), disabled by
+  default behind an explicit opt-in, a persistent kill switch that overrides
+  everything, automatic downgrade to review whenever any precondition fails
+  or an unknown/sensitive/injection field appears, per-outcome audit metrics,
+  and an [incident runbook](docs/RUNBOOK_automatic_mode.md)
 - Local FastAPI service exposing the complete loop: discover → rank →
-  prepare → review → readiness → queue → review-mode execution →
-  approve → submit → verify → history
+  prepare → review → readiness → queue (review or automatic) → execution →
+  approve/eligibility → submit → verify → history
 
-Not yet implemented: limited automatic mode (Phase 12), additional ATS
-adapters (Phase 13).
+Not yet implemented: ATS expansion — Workday/SmartRecruiters/iCIMS adapters,
+multiple browser profiles, richer analytics (Phase 13).
 
 ## Quick start
 

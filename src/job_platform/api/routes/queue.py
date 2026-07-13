@@ -26,21 +26,33 @@ class QueueCreateRequest(BaseModel):
     package_ids: list[str] = Field(min_length=1)
     ordering: str = Field(default="selected_order",
                           pattern="^(selected_order|highest_match_first)$")
+    mode: str = Field(default="review", pattern="^(review|automatic)$")
+
+
+def _manager_for(queue: QueueModel, state: AppState):
+    return state.queue_manager(automatic=queue.mode == "automatic")
 
 
 def _queue_payload(queue: QueueModel, state: AppState) -> dict:
     payload = queue.model_dump(mode="json")
     payload["events"] = [
         e.model_dump(mode="json")
-        for e in state.queue_manager().events(queue.queue_id, limit=50)
+        for e in _manager_for(queue, state).events(queue.queue_id, limit=50)
     ]
     return payload
 
 
 @router.post("/api/queue", status_code=201)
 def create_queue(request: QueueCreateRequest, state: AppState = Depends(get_state)) -> dict:
-    queue = state.queue_manager().create(
-        request.package_ids, state.candidate_bundle(), request.ordering
+    from job_platform.shared.errors import ConfigurationError
+
+    if request.mode == "automatic" and not state.settings.automatic_mode.enabled:
+        raise ConfigurationError(
+            "Automatic mode is not enabled; enable it in settings before "
+            "creating an automatic queue."
+        )
+    queue = state.queue_manager(automatic=request.mode == "automatic").create(
+        request.package_ids, state.candidate_bundle(), request.ordering, mode=request.mode
     )
     return _queue_payload(queue, state)
 
@@ -68,7 +80,8 @@ async def run_queue(
     resume: bool = Query(default=False),
     state: AppState = Depends(get_state),
 ) -> dict:
-    manager = state.queue_manager()
+    queue = state.queue_manager().load(queue_id)  # any manager can load
+    manager = _manager_for(queue, state)  # runner must match the queue's mode
     if wait:
         queue = await manager.run(queue_id, resume=resume)
         return _queue_payload(queue, state)
@@ -108,3 +121,69 @@ def skip_item(
 ) -> dict:
     queue = state.queue_manager().skip_item(queue_id, package_id)
     return _queue_payload(queue, state)
+
+
+# --- Automatic mode control (docs/17 Phase 12) ----------------------------- #
+
+
+class AutomaticModeUpdate(BaseModel):
+    enabled: bool
+    adapter_allowlist: list[str] | None = None
+    company_allowlist: list[str] | None = None
+    daily_limit: int | None = None
+    per_company_daily_limit: int | None = None
+
+
+@router.get("/api/automatic-mode")
+def get_automatic_mode(state: AppState = Depends(get_state)) -> dict:
+    settings = state.settings.automatic_mode
+    kill = state.kill_switch()
+    return {
+        "settings": settings.model_dump(),
+        "kill_switch_engaged": kill.engaged,
+        "kill_switch_reason": kill.reason(),
+        "effective_enabled": settings.enabled and not kill.engaged,
+    }
+
+
+@router.put("/api/automatic-mode")
+def update_automatic_mode(
+    update: AutomaticModeUpdate, state: AppState = Depends(get_state)
+) -> dict:
+    settings = state.settings.automatic_mode
+    settings.enabled = update.enabled
+    if update.adapter_allowlist is not None:
+        settings.adapter_allowlist = update.adapter_allowlist
+    if update.company_allowlist is not None:
+        settings.company_allowlist = update.company_allowlist
+    if update.daily_limit is not None:
+        settings.daily_limit = update.daily_limit
+    if update.per_company_daily_limit is not None:
+        settings.per_company_daily_limit = update.per_company_daily_limit
+    return get_automatic_mode(state)
+
+
+class KillSwitchRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/api/automatic-mode/kill")
+def engage_kill_switch(
+    request: KillSwitchRequest, state: AppState = Depends(get_state)
+) -> dict:
+    state.kill_switch().engage(request.reason)
+    return {"kill_switch_engaged": True, "reason": request.reason}
+
+
+@router.post("/api/automatic-mode/release")
+def release_kill_switch(state: AppState = Depends(get_state)) -> dict:
+    state.kill_switch().release()
+    return {"kill_switch_engaged": False}
+
+
+@router.get("/api/automatic-mode/metrics")
+def automatic_metrics(state: AppState = Depends(get_state)) -> dict:
+    from job_platform.orchestration.automatic import compute_metrics
+
+    events = state.history_service().events(limit=10000)
+    return compute_metrics(events).model_dump(mode="json")
