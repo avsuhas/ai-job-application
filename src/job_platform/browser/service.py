@@ -179,6 +179,7 @@ class BrowserSession:
             signals=signals,
             validation_errors=raw.get("validation_errors", []),
             frames=content.iframe_titles,
+            text_excerpt=content.text[:2000],
         )
         logger.info(
             "Inspected page (state=%s, fields=%d, actions=%d)",

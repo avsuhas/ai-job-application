@@ -37,6 +37,12 @@ class QueueAdmissionController:
         self._allow_warnings = allow_ready_with_warnings
 
     def _prior_submission_unknown(self, package_id: str) -> bool:
+        # A protected unknown outcome always blocks (docs/10 Unknown Rules).
+        unknown_path = (
+            self._store.package_dir(package_id) / "submission/unknown_outcome.json"
+        )
+        if unknown_path.exists():
+            return True
         try:
             raw = self._store.read_artifact(package_id, "execution/state.json")
         except StorageError:

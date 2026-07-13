@@ -28,3 +28,18 @@ def record_application(record: ApplicationRecord, state: AppState = Depends(get_
     """
     state.tracker.add(record)
     return {"recorded": True, "company": record.company, "job_title": record.job_title}
+
+
+@router.get("/api/history/export")
+def export_history(state: AppState = Depends(get_state)) -> dict:
+    """Rebuild the XLSX workbook from the CSV source of truth (docs/10)."""
+    path = state.history_service().rebuild_xlsx()
+    return {"format": "xlsx", "path": str(path), "records": len(state.tracker.records())}
+
+
+@router.get("/api/history/events")
+def history_events(
+    package_id: str | None = None, state: AppState = Depends(get_state)
+) -> dict:
+    events = state.history_service().events(package_id=package_id)
+    return {"count": len(events), "events": [e.model_dump(mode="json") for e in events]}
